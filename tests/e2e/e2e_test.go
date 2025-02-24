@@ -11,6 +11,7 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/nats-io/nats.go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -21,6 +22,9 @@ const (
 	pollInterval        = 500 * time.Millisecond // Polling interval for Eventually
 	nodeStartupDelay    = 10 * time.Second       // Initial delay for node startup
 	nodeShutdownTimeout = 5 * time.Second        // Timeout for node shutdown
+	natsConnectTimeout  = 10 * time.Second       // Timeout for NATS connection
+	natsRetryAttempts   = 5                      // Number of NATS connection retries
+	natsRetryDelay      = 2 * time.Second        // Initial delay for NATS retries
 )
 
 // cleanup removes temporary files and directories
@@ -59,14 +63,12 @@ func startCluster() (*exec.Cmd, *exec.Cmd, *exec.Cmd) {
 		createDB(fmt.Sprintf("/tmp/marmot-%d.db", i))
 	}
 
-	// Start nodes with correct peering
-	node1 := startNode("examples/node-1-config.toml", "localhost:4221", "nats://localhost:4222/,nats://localhost:4223/")
-	node2 := startNode("examples/node-2-config.toml", "localhost:4222", "nats://localhost:4221/,nats://localhost:4223/")
-	node3 := startNode("examples/node-3-config.toml", "localhost:4223", "nats://localhost:4221/,nats://localhost:4222/")
+	// Start nodes with staggered start and NATS health checks
+	node1 := startNodeWithCheck("examples/node-1-config.toml", "127.0.0.1:4221", "nats://127.0.0.1:4222/,nats://127.0.0.1:4223/")
+	node2 := startNodeWithCheck("examples/node-2-config.toml", "127.0.0.1:4222", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/")
+	node3 := startNodeWithCheck("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/")
 
-	// Wait for nodes to stabilize
-	time.Sleep(nodeStartupDelay)
-	GinkgoWriter.Printf("Cluster started, waiting %v for stabilization\n", nodeStartupDelay)
+	GinkgoWriter.Printf("Cluster started, waiting %v for stabilization\n", nodeStartupDelay*2)
 
 	return node1, node2, node3
 }
@@ -118,7 +120,7 @@ func createDB(dbFile string) {
 }
 
 // startNode launches a Marmot node
-func startNode(config, addr, peers string) *exec.Cmd {
+func startNodeWithCheck(config, addr, peers string) *exec.Cmd {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Starting node with config %s, addr %s, peers %s\n", config, addr, peers)
 	wd, err := os.Getwd()
@@ -130,6 +132,41 @@ func startNode(config, addr, peers string) *exec.Cmd {
 	cmd.Stderr = GinkgoWriter
 	err = cmd.Start()
 	Expect(err).To(BeNil(), "Failed to start node with config %s", config)
+
+	// Extract NATS URL from config (you might need a more robust way to do this)
+	natsURL := "nats://" + addr // Simplification: assumes NATS is on the same address
+
+	// Retry NATS connection with backoff
+	var nc *nats.Conn
+	for i := 0; i < natsRetryAttempts; i++ {
+		nc, err = nats.Connect(natsURL, nats.Timeout(natsConnectTimeout))
+		if err == nil {
+			break // Connected successfully
+		}
+		GinkgoWriter.Printf("NATS connection attempt %d failed: %v\n", i+1, err)
+		backoff := natsRetryDelay * time.Duration(i+1) //Simple linear backoff
+		if backoff > 16*time.Second {
+			backoff = 16 * time.Second // Maximum backoff
+		}
+		time.Sleep(backoff)
+	}
+	Expect(err).To(BeNil(), "Failed to connect to NATS after retries")
+	defer nc.Close()
+
+	// Basic NATS cluster health check (expand as needed)
+	Eventually(func() bool {
+		if nc.ConnectedServerId() == "" {
+			GinkgoWriter.Printf("Waiting for server info\n")
+			return false
+		}
+		if len(nc.DiscoveredServers()) < 2 { // We expect 3, but check at least 2 are found
+			GinkgoWriter.Printf("Waiting for more servers to be discovered: %v\n", nc.DiscoveredServers())
+			return false
+		}
+		GinkgoWriter.Printf("NATS Cluster Healthy\n")
+		return true
+	}, maxWaitTime, pollInterval).Should(BeTrue(), "NATS cluster did not become healthy")
+
 	return cmd
 }
 
