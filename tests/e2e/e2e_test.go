@@ -166,7 +166,7 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 		BeforeEach(func() {
 		})
 
-		XIt("should replicate changes across multiple tables", func() {
+		It("should replicate changes across multiple tables", func() {
 			bookID := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Multi-Table Book", "Jane Austen", 1813)
 			authorID := insertAuthor(filepath.Join(dbDir, "marmot-1.db"), "Jane Austen", 1775)
 
