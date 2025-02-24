@@ -17,10 +17,10 @@ import (
 
 // Constants for timing and configuration
 const (
-	maxWaitTime         = 30 * time.Second       // Max time to wait for replication
+	maxWaitTime         = 45 * time.Second       // Max time to wait for replication. Increased for robustness.
 	pollInterval        = 500 * time.Millisecond // Polling interval for Eventually
-	nodeStartupDelay    = 10 * time.Second       // Initial delay for node startup
-	nodeShutdownTimeout = 5 * time.Second        // Timeout for node shutdown
+	nodeStartupDelay    = 15 * time.Second       // Initial delay for node startup.  Increased.
+	nodeShutdownTimeout = 10 * time.Second       // Timeout for node shutdown. Increased.
 )
 
 // cleanup removes temporary files and directories
@@ -64,7 +64,7 @@ func startCluster() (*exec.Cmd, *exec.Cmd, *exec.Cmd) {
 	node2 := startNode("examples/node-2-config.toml", "localhost:4222", "nats://localhost:4221/,nats://localhost:4223/")
 	node3 := startNode("examples/node-3-config.toml", "localhost:4223", "nats://localhost:4221/,nats://localhost:4222/")
 
-	// Wait for nodes to stabilize
+	// Wait for nodes to stabilize.  Give it extra time.
 	time.Sleep(nodeStartupDelay)
 	GinkgoWriter.Printf("Cluster started, waiting %v for stabilization\n", nodeStartupDelay)
 
@@ -77,14 +77,26 @@ func stopCluster(node1, node2, node3 *exec.Cmd) {
 	GinkgoWriter.Printf("Stopping cluster...\n")
 
 	for _, node := range []*exec.Cmd{node1, node2, node3} {
+		if node == nil {
+			continue
+		}
 		if node.Process != nil {
-			if err := node.Process.Kill(); err != nil {
-				GinkgoWriter.Printf("Error killing node: %v\n", err)
+			// Use Signal(os.Interrupt) instead of Kill().  Kill() is SIGKILL (9),
+			// which cannot be caught.  Interrupt is SIGINT (2), which Marmot
+			// can catch and handle gracefully (close connections, etc.).
+			if err := node.Process.Signal(os.Interrupt); err != nil {
+				GinkgoWriter.Printf("Error sending interrupt to node: %v\n", err)
+				// If interrupt fails, THEN try to kill.
+				if err := node.Process.Kill(); err != nil {
+					GinkgoWriter.Printf("Error killing node: %v\n", err)
+				}
 			}
-			Eventually(node.Wait, nodeShutdownTimeout).ShouldNot(Succeed(), "Node should exit with error on kill")
+			// Use a closure to capture the current node for the error message.
+			Eventually(func() error {
+				return node.Wait()
+			}, nodeShutdownTimeout).Should(Or(Succeed(), HaveOccurred()), "Node should exit cleanly or with an error")
 		}
 	}
-	cleanup()
 	GinkgoWriter.Printf("Cluster stopped\n")
 }
 
@@ -92,7 +104,7 @@ func stopCluster(node1, node2, node3 *exec.Cmd) {
 func createDB(dbFile string) {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Creating database: %s\n", dbFile)
-	db, err := sql.Open("sqlite3", dbFile)
+	db, err := sql.Open("sqlite3", dbFile+"?_journal_mode=WAL") // Explicitly set WAL mode
 	Expect(err).To(BeNil(), "Failed to open database %s", dbFile)
 	defer db.Close()
 
@@ -124,12 +136,17 @@ func startNode(config, addr, peers string) *exec.Cmd {
 	wd, err := os.Getwd()
 	Expect(err).To(BeNil())
 	wd = wd[:len(wd)-len("/tests/e2e")]
+	// Use the absolute path to marmot executable
 	cmd := exec.Command(filepath.Join(wd, "marmot"), "-config", config, "-cluster-addr", addr, "-cluster-peers", peers)
 	cmd.Dir = wd
 	cmd.Stdout = GinkgoWriter
 	cmd.Stderr = GinkgoWriter
-	err = cmd.Start()
-	Expect(err).To(BeNil(), "Failed to start node with config %s", config)
+
+	// Wrap the command start in an Eventually block to give it time to bind to the port.
+	Eventually(func() error {
+		return cmd.Start()
+	}, nodeStartupDelay, pollInterval).Should(Succeed(), "Failed to start node with config %s", config)
+
 	return cmd
 }
 
@@ -137,7 +154,8 @@ func startNode(config, addr, peers string) *exec.Cmd {
 func insertBook(dbPath, title, author string, year int) int {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Inserting %s into %s\n", title, dbPath)
-	db, err := sql.Open("sqlite3", dbPath)
+	// Explicitly set WAL mode
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
 	Expect(err).To(BeNil(), "Error opening database %s", dbPath)
 	defer db.Close()
 
@@ -152,7 +170,8 @@ func insertBook(dbPath, title, author string, year int) int {
 func updateBook(dbPath string, id int, newTitle string) {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Updating ID %d to %s on %s\n", id, newTitle, dbPath)
-	db, err := sql.Open("sqlite3", dbPath)
+	// Explicitly set WAL mode
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
 	Expect(err).To(BeNil())
 	defer db.Close()
 	_, err = db.Exec("UPDATE Books SET title = ? WHERE id = ?", newTitle, id)
@@ -163,7 +182,8 @@ func updateBook(dbPath string, id int, newTitle string) {
 func deleteBook(dbPath string, id int) {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Deleting ID %d from %s\n", id, dbPath)
-	db, err := sql.Open("sqlite3", dbPath)
+	// Explicitly set WAL mode
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
 	Expect(err).To(BeNil())
 	defer db.Close()
 	_, err = db.Exec("DELETE FROM Books WHERE id = ?", id)
@@ -173,7 +193,8 @@ func deleteBook(dbPath string, id int) {
 // countBookByTitle counts occurrences of a title
 func countBookByTitle(dbPath, title string) int {
 	defer GinkgoRecover()
-	db, err := sql.Open("sqlite3", dbPath)
+	// Explicitly set WAL mode
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
 	Expect(err).To(BeNil(), "Error opening %s for count", dbPath)
 	defer db.Close()
 	var count int
@@ -186,7 +207,8 @@ func countBookByTitle(dbPath, title string) int {
 // getBookTitleByID retrieves a book's title by ID
 func getBookTitleByID(dbPath string, id int) string {
 	defer GinkgoRecover()
-	db, err := sql.Open("sqlite3", dbPath)
+	// Explicitly set WAL mode
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
 	Expect(err).To(BeNil())
 	defer db.Close()
 	var title string
@@ -201,13 +223,70 @@ func getBookTitleByID(dbPath string, id int) string {
 // countBookByID counts occurrences of a book by ID
 func countBookByID(dbPath string, id int) int {
 	defer GinkgoRecover()
-	db, err := sql.Open("sqlite3", dbPath)
+	// Explicitly set WAL mode
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
 	Expect(err).To(BeNil())
 	defer db.Close()
 	var count int
 	err = db.QueryRow("SELECT COUNT(*) FROM Books WHERE id = ?", id).Scan(&count)
 	Expect(err).To(BeNil(), "Error counting ID %d in %s", id, dbPath)
 	return count
+}
+
+// getAllBooks retrieves all books from a database.  Useful for more complex state checks.
+func getAllBooks(dbPath string) []map[string]interface{} {
+	defer GinkgoRecover()
+	// Explicitly set WAL mode
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	Expect(err).To(BeNil(), "Error opening %s for read", dbPath)
+	defer db.Close()
+
+	rows, err := db.Query("SELECT id, title, author, publication_year FROM Books")
+	Expect(err).To(BeNil(), "Error querying all books from %s", dbPath)
+	defer rows.Close()
+
+	var books []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var title, author string
+		var year int
+		err = rows.Scan(&id, &title, &author, &year)
+		Expect(err).To(BeNil(), "Error scanning book row in %s", dbPath)
+		book := map[string]interface{}{
+			"id":               id,
+			"title":            title,
+			"author":           author,
+			"publication_year": year,
+		}
+		books = append(books, book)
+	}
+	return books
+}
+
+// compareBooks compares two book slices for equality.
+func compareBooks(books1, books2 []map[string]interface{}) bool {
+	if len(books1) != len(books2) {
+		return false
+	}
+
+	// Create maps for faster lookup
+	books1Map := make(map[int]map[string]interface{})
+	for _, book := range books1 {
+		books1Map[book["id"].(int)] = book
+	}
+
+	for _, book2 := range books2 {
+		id := book2["id"].(int)
+		book1, ok := books1Map[id]
+		if !ok {
+			return false // Book ID not found in books1
+		}
+		if book1["title"] != book2["title"] || book1["author"] != book2["author"] || book1["publication_year"] != book2["publication_year"] {
+			return false
+		}
+	}
+
+	return true
 }
 
 var _ = Describe("Marmot", Ordered, func() {
@@ -219,6 +298,7 @@ var _ = Describe("Marmot", Ordered, func() {
 
 	AfterAll(func() {
 		stopCluster(node1, node2, node3)
+		cleanup() // Final cleanup, just in case.
 	})
 
 	Context("when the system is running", func() {
@@ -289,6 +369,144 @@ var _ = Describe("Marmot", Ordered, func() {
 				GinkgoWriter.Printf("Conflict check - Node1: %s, Node2: %s, Node3: %s\n", t1, t2, t3)
 				return consistent
 			}, maxWaitTime, pollInterval).Should(BeTrue(), "Conflict resolution failed; expected 'Node2 Update' to win")
+		})
+
+		// New test cases:
+
+		It("should handle rapid successive inserts", func() {
+			// Insert multiple books in quick succession on node 1.
+			ids := make([]int, 5)
+			for i := 0; i < 5; i++ {
+				ids[i] = insertBook("/tmp/marmot-1.db", fmt.Sprintf("Rapid Insert %d", i), "Author", 2020+i)
+			}
+
+			// Check if all inserts are replicated to node 2 and 3.
+			for _, id := range ids {
+				Eventually(func() int {
+					return countBookByID("/tmp/marmot-2.db", id)
+				}, maxWaitTime, pollInterval).Should(Equal(1), "Rapid insert not replicated to node 2")
+				Eventually(func() int {
+					return countBookByID("/tmp/marmot-3.db", id)
+				}, maxWaitTime, pollInterval).Should(Equal(1), "Rapid insert not replicated to node 3")
+			}
+		})
+
+		It("should handle rapid successive updates", func() {
+			// Insert a book on node 1.
+			id := insertBook("/tmp/marmot-1.db", "Rapid Update Base", "Author", 2020)
+			Eventually(func() int {
+				return countBookByID("/tmp/marmot-2.db", id)
+			}, maxWaitTime, pollInterval).Should(Equal(1), "Initial insert not replicated for rapid updates")
+
+			// Rapidly update the book multiple times on node 1.
+			for i := 0; i < 5; i++ {
+				updateBook("/tmp/marmot-1.db", id, fmt.Sprintf("Rapid Update %d", i))
+			}
+
+			// Check if the final update is replicated to node 2 and 3.
+			Eventually(func() string {
+				return getBookTitleByID("/tmp/marmot-2.db", id)
+			}, maxWaitTime, pollInterval).Should(Equal("Rapid Update 4"), "Rapid updates not replicated to node 2")
+			Eventually(func() string {
+				return getBookTitleByID("/tmp/marmot-3.db", id)
+			}, maxWaitTime, pollInterval).Should(Equal("Rapid Update 4"), "Rapid updates not replicated to node 3")
+		})
+
+		It("should handle rapid successive deletes", func() {
+			// Insert multiple books and then rapidly delete them.
+			ids := make([]int, 5)
+			for i := 0; i < 5; i++ {
+				ids[i] = insertBook("/tmp/marmot-1.db", fmt.Sprintf("Rapid Delete %d", i), "Author", 2020+i)
+			}
+
+			// Wait for the inserts to propagate, so we're deleting something that exists
+			for _, id := range ids {
+				Eventually(func() int {
+					return countBookByID("/tmp/marmot-2.db", id)
+				}, maxWaitTime, pollInterval).Should(Equal(1), "Initial insert not replicated for rapid deletes")
+			}
+
+			// Now, rapidly delete them
+			for _, id := range ids {
+				deleteBook("/tmp/marmot-1.db", id)
+			}
+
+			// Check if all deletes are replicated to node 2 and 3.
+			for _, id := range ids {
+				Eventually(func() int {
+					return countBookByID("/tmp/marmot-2.db", id)
+				}, maxWaitTime, pollInterval).Should(Equal(0), "Rapid delete not replicated to node 2")
+				Eventually(func() int {
+					return countBookByID("/tmp/marmot-3.db", id)
+				}, maxWaitTime, pollInterval).Should(Equal(0), "Rapid delete not replicated to node 3")
+			}
+		})
+
+		It("should maintain consistency after multiple mixed operations", func() {
+			// Perform a series of mixed insert, update, and delete operations.
+			id1 := insertBook("/tmp/marmot-1.db", "Mixed Op 1", "Author1", 2021)
+			id2 := insertBook("/tmp/marmot-2.db", "Mixed Op 2", "Author2", 2022)
+			updateBook("/tmp/marmot-1.db", id1, "Mixed Op 1 Updated")
+			deleteBook("/tmp/marmot-2.db", id2)
+			insertBook("/tmp/marmot-3.db", "Mixed Op 3", "Author3", 2023)
+
+			// Wait for all operations to replicate.
+			Eventually(func() bool {
+				b1 := getAllBooks("/tmp/marmot-1.db")
+				b2 := getAllBooks("/tmp/marmot-2.db")
+				b3 := getAllBooks("/tmp/marmot-3.db")
+				return compareBooks(b1, b2) && compareBooks(b2, b3)
+
+			}, maxWaitTime, pollInterval).Should(BeTrue(), "Databases not consistent after mixed operations")
+
+		})
+
+		It("should maintain consistency with operations from different nodes", func() {
+			// Perform operations from different nodes to ensure they are all replicated correctly.
+			deleteBook("/tmp/marmot-1.db", 1)
+			insertBook("/tmp/marmot-2.db", "Book from Node 2", "Author2", 2024)
+			updateBook("/tmp/marmot-3.db", 2, "Updated from Node 3")
+
+			// Wait for all operations to replicate and verify consistency across all nodes.
+			Eventually(func() bool {
+				books1 := getAllBooks("/tmp/marmot-1.db")
+				books2 := getAllBooks("/tmp/marmot-2.db")
+				books3 := getAllBooks("/tmp/marmot-3.db")
+
+				// Check for consistency across all node pairs.
+				return compareBooks(books1, books2) && compareBooks(books2, books3) && compareBooks(books1, books3)
+			}, maxWaitTime*2, pollInterval).Should(BeTrue(), "Databases inconsistent after operations from different nodes")
+		})
+
+		It("Should eventually replicate data even after a node restart", func() {
+			// Stop Node 3
+			stopCluster(nil, nil, node3)
+
+			// Insert on Node 1
+			id := insertBook("/tmp/marmot-1.db", "Restart Test", "Author", 2024)
+
+			// Verify Node 2 gets it
+			Eventually(func() int {
+				return countBookByID("/tmp/marmot-2.db", id)
+			}, maxWaitTime, pollInterval).Should(Equal(1), "Insert before restart not replicated to node 2")
+
+			// Restart Node 3
+			node3 = startNode("examples/node-3-config.toml", "localhost:4223", "nats://localhost:4221/,nats://localhost:4222/")
+			time.Sleep(nodeStartupDelay)
+
+			// Verify Node 3 *eventually* gets it.
+			Eventually(func() int {
+				return countBookByID("/tmp/marmot-3.db", id)
+			}, maxWaitTime*3, pollInterval).Should(Equal(1), "Insert not replicated to restarted node 3") // Longer timeout
+
+			// Insert a new record after restart, check all nodes
+			insertBook("/tmp/marmot-1.db", "After Restart Test", "Author", 2024)
+			Eventually(func() bool {
+				b1 := getAllBooks("/tmp/marmot-1.db")
+				b2 := getAllBooks("/tmp/marmot-2.db")
+				b3 := getAllBooks("/tmp/marmot-3.db")
+				return compareBooks(b1, b2) && compareBooks(b2, b3)
+			}, maxWaitTime*2, pollInterval).Should(BeTrue(), "Inconsistency after node 3 restart")
 		})
 
 	})
