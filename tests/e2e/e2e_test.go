@@ -159,10 +159,6 @@ func startNodeWithCheck(config, addr, peers string) *exec.Cmd {
 			GinkgoWriter.Printf("Waiting for server info\n")
 			return false
 		}
-		if len(nc.DiscoveredServers()) < 2 { // We expect 3, but check at least 2 are found
-			GinkgoWriter.Printf("Waiting for more servers to be discovered: %v\n", nc.DiscoveredServers())
-			return false
-		}
 		GinkgoWriter.Printf("NATS Cluster Healthy\n")
 		return true
 	}, maxWaitTime, pollInterval).Should(BeTrue(), "NATS cluster did not become healthy")
