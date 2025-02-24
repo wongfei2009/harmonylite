@@ -2,7 +2,6 @@ package main_test
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -20,12 +19,6 @@ import (
 func startCluster() (node1, node2, node3 *exec.Cmd) {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Starting cluster setup...\n")
-	cleanup()
-
-	// Create databases
-	for i := 1; i <= 3; i++ {
-		createDatabase(fmt.Sprintf("%s/marmot-%d.db", dbDir, i))
-	}
 
 	// Start nodes with NATS health checks
 	node1 = startNode("examples/node-1-config.toml", "127.0.0.1:4221", "nats://127.0.0.1:4222/,nats://127.0.0.1:4223/")
@@ -36,10 +29,10 @@ func startCluster() (node1, node2, node3 *exec.Cmd) {
 	return node1, node2, node3
 }
 
-// stopCluster gracefully stops the Marmot cluster.
-func stopCluster(nodes ...*exec.Cmd) {
+// stopNodes gracefully stops the provided Marmot nodes.
+func stopNodes(nodes ...*exec.Cmd) {
 	defer GinkgoRecover()
-	GinkgoWriter.Printf("Stopping cluster...\n")
+	GinkgoWriter.Printf("Stopping nodes...\n")
 
 	for _, node := range nodes {
 		if node != nil && node.Process != nil {
@@ -52,8 +45,7 @@ func stopCluster(nodes ...*exec.Cmd) {
 			}(node)
 		}
 	}
-	cleanup()
-	GinkgoWriter.Printf("Cluster stopped\n")
+	GinkgoWriter.Printf("Nodes stopped\n")
 }
 
 // startNode launches a Marmot node and performs a NATS health check.
@@ -240,6 +232,65 @@ func countBooksByID(dbPath string, id int64) int {
 	defer db.Close()
 	var count int
 	err = db.QueryRow("SELECT COUNT(*) FROM Books WHERE id = ?", id).Scan(&count)
+	Expect(err).To(BeNil(), "Error counting ID %d in %s", id, dbPath)
+	return count
+}
+
+// createAuthorsTable creates an Authors table in the specified database
+func createAuthorsTable(dbPath string) {
+	defer GinkgoRecover()
+	GinkgoWriter.Printf("Creating Authors table in: %s\n", dbPath)
+	db, err := sql.Open("sqlite3", dbPath)
+	Expect(err).To(BeNil(), "Failed to open database %s", dbPath)
+	defer db.Close()
+
+	_, err = db.Exec(`
+		DROP TABLE IF EXISTS Authors;
+		CREATE TABLE Authors (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			birth_year INTEGER
+		);
+	`)
+	Expect(err).To(BeNil(), "Failed to create Authors table in %s", dbPath)
+}
+
+// insertAuthor inserts a new author into the database
+func insertAuthor(dbPath, name string, birthYear int) int64 {
+	defer GinkgoRecover()
+	GinkgoWriter.Printf("Inserting author %s into %s\n", name, dbPath)
+	db, err := sql.Open("sqlite3", dbPath)
+	Expect(err).To(BeNil(), "Error opening database %s", dbPath)
+	defer db.Close()
+
+	res, err := db.Exec(`INSERT INTO Authors (name, birth_year) VALUES (?, ?)`, name, birthYear)
+	Expect(err).To(BeNil(), "Error inserting author into %s", dbPath)
+	id, err := res.LastInsertId()
+	Expect(err).To(BeNil(), "Error getting last insert ID from %s", dbPath)
+	return id
+}
+
+// countAuthorsByName counts the number of authors with a given name
+func countAuthorsByName(dbPath, name string) int {
+	defer GinkgoRecover()
+	db, err := sql.Open("sqlite3", dbPath)
+	Expect(err).To(BeNil(), "Error opening %s for count", dbPath)
+	defer db.Close()
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM Authors WHERE name = ?", name).Scan(&count)
+	Expect(err).To(BeNil(), "Error counting name %s in %s", name, dbPath)
+	GinkgoWriter.Printf("Counted %d '%s' in %s\n", count, name, dbPath)
+	return count
+}
+
+// countAuthorsByID counts the number of authors with a given ID
+func countAuthorsByID(dbPath string, id int64) int {
+	defer GinkgoRecover()
+	db, err := sql.Open("sqlite3", dbPath)
+	Expect(err).To(BeNil())
+	defer db.Close()
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM Authors WHERE id = ?", id).Scan(&count)
 	Expect(err).To(BeNil(), "Error counting ID %d in %s", id, dbPath)
 	return count
 }
