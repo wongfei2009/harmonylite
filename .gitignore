@@ -21,7 +21,7 @@ build/
 *.crt
 *.key
 *.pem
-marmot
+harmonylite
 dist/
 
 # NPM Stuff

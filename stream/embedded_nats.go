@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maxpert/marmot/cfg"
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/cfg"
 )
 
 type embeddedNats struct {
@@ -137,7 +137,7 @@ func (e *embeddedNats) prepareConnection(opts ...nats.Option) (*nats.Conn, error
 			return nil, err
 		}
 
-		st, err := j.StreamInfo("marmot-r", nats.MaxWait(1*time.Second))
+		st, err := j.StreamInfo("harmonylite-r", nats.MaxWait(1*time.Second))
 		if err == nats.ErrStreamNotFound || st != nil {
 			log.Info().Msg("Streaming ready...")
 			return c, nil

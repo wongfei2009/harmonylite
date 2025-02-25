@@ -1,12 +1,12 @@
-const basePath = "/marmot";
+const basePath = "/harmonylite";
 
 /**
  * @type {import("nextra-theme-docs").DocsThemeConfig}
  */
 export default {
-  project: { link: "https://github.com/maxpert/marmot" },
-  docsRepositoryBase: "https://github.com/maxpert/marmot/tree/master/docs",
-  titleSuffix: " - Marmot",
+  project: { link: "https://github.com/wongfei2009/harmonylite" },
+  docsRepositoryBase: "https://github.com/wongfei2009/harmonylite/tree/master/docs",
+  titleSuffix: " - HarmonyLite",
   logo: (
     <>
       <img width={50} style={{ marginRight: 5 }} src={`${basePath}/logo.png`} />
@@ -23,22 +23,22 @@ export default {
       <meta httpEquiv="Content-Language" content="en" />
       <meta
         name="description"
-        content="Marmot: A distributed SQLite replicator built on top of NATS"
+        content="HarmonyLite: A distributed SQLite replicator built on top of NATS"
       />
       <meta
         name="og:description"
-        content="Marmot: A distributed SQLite replicator built on top of NATS"
+        content="HarmonyLite: A distributed SQLite replicator built on top of NATS"
       />
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:image" content={`${basePath}/logo.png`} />
-      <meta name="twitter:site:domain" content="https://github.com/maxpert/marmot" />
-      <meta name="twitter:url" content="https://github.com/maxpert/marmot" />
+      <meta name="twitter:site:domain" content="https://github.com/wongfei2009/harmonylite" />
+      <meta name="twitter:url" content="https://github.com/wongfei2009/harmonylite" />
       <meta
         name="og:title"
-        content="Marmot: A distributed SQLite replicator built on top of NATS"
+        content="HarmonyLite: A distributed SQLite replicator built on top of NATS"
       />
       <meta name="og:image" content={`${basePath}/logo.png`} />
-      <meta name="apple-mobile-web-app-title" content="Marmot" />
+      <meta name="apple-mobile-web-app-title" content="HarmonyLite" />
       <link rel="apple-touch-icon" sizes="180x180" href={`${basePath}/logo.png`} />
       <link rel="icon" type="image/png" sizes="192x192" href={`${basePath}/logo.png`} />
       <link rel="icon" type="image/png" sizes="32x32" href={`${basePath}/logo.png`} />
@@ -48,7 +48,7 @@ export default {
     </>
   ),
   navigation: true,
-  footer: { text: <>MIT {new Date().getFullYear()} © Marmot.</> },
+  footer: { text: <>MIT {new Date().getFullYear()} © HarmonyLite.</> },
   editLink: { text: "Edit this page on GitHub" },
   unstable_faviconGlyph: "👋",
 };

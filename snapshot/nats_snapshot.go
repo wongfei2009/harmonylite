@@ -3,7 +3,7 @@ package snapshot
 import (
 	"errors"
 
-	"github.com/maxpert/marmot/cfg"
+	"github.com/wongfei2009/harmonylite/cfg"
 )
 
 var ErrInvalidStorageType = errors.New("invalid snapshot storage type")

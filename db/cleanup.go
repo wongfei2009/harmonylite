@@ -8,9 +8,9 @@ import (
 )
 
 const deleteTriggerQuery = `DROP TRIGGER IF EXISTS %s`
-const deleteMarmotTables = `DROP TABLE IF EXISTS %s;`
+const deleteHarmonyLiteTables = `DROP TABLE IF EXISTS %s;`
 
-func removeMarmotTriggers(conn *goqu.Database, prefix string) error {
+func removeHarmonyLiteTriggers(conn *goqu.Database, prefix string) error {
 	triggers := make([]string, 0)
 	err := conn.
 		Select("name").
@@ -34,7 +34,7 @@ func removeMarmotTriggers(conn *goqu.Database, prefix string) error {
 	return nil
 }
 
-func removeMarmotTables(conn *goqu.Database, prefix string) error {
+func removeHarmonyLiteTables(conn *goqu.Database, prefix string) error {
 	tables := make([]string, 0)
 	err := conn.
 		Select("name").
@@ -47,10 +47,10 @@ func removeMarmotTables(conn *goqu.Database, prefix string) error {
 	}
 
 	for _, name := range tables {
-		query := fmt.Sprintf(deleteMarmotTables, name)
+		query := fmt.Sprintf(deleteHarmonyLiteTables, name)
 		_, err = conn.Exec(query)
 		if err != nil {
-			log.Error().Err(err).Msg("Unable to delete marmot tables")
+			log.Error().Err(err).Msg("Unable to delete harmonylite tables")
 			return err
 		}
 	}

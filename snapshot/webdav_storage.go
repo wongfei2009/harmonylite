@@ -9,9 +9,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/maxpert/marmot/cfg"
 	"github.com/rs/zerolog/log"
 	"github.com/studio-b12/gowebdav"
+	"github.com/wongfei2009/harmonylite/cfg"
 )
 
 const queryParamTargetDir = "dir"

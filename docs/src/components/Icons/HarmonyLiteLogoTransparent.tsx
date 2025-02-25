@@ -5,7 +5,7 @@ type Props = React.SVGProps<SVGSVGElement> & {
   height?: number | string;
 };
 
-function MarmotLogoTransparent(props: Props) {
+function HarmonyLiteLogoTransparent(props: Props) {
   const { width = 250, height = 250 } = props;
   return (
     <svg width={width} height={height} viewBox="0 0 614.4 181.44" {...props}>
@@ -28,7 +28,7 @@ function MarmotLogoTransparent(props: Props) {
               lineHeight: 1,
             }}
           >
-            {"MARMOT"}
+            {"HARMONYLITE"}
           </tspan>
         </tspan>
       </text>
@@ -57,5 +57,5 @@ function MarmotLogoTransparent(props: Props) {
   );
 }
 
-const MemoMarmotLogoTransparent = React.memo(MarmotLogoTransparent);
-export default MemoMarmotLogoTransparent;
+const MemoHarmonyLiteLogoTransparent = React.memo(HarmonyLiteLogoTransparent);
+export default MemoHarmonyLiteLogoTransparent;

@@ -16,8 +16,8 @@ import (
 
 type SnapshotStoreType string
 
-const NodeNamePrefix = "marmot-node"
-const EmbeddedClusterName = "e-marmot"
+const NodeNamePrefix = "harmonylite-node"
+const EmbeddedClusterName = "e-harmonylite"
 const (
 	Nats   SnapshotStoreType = "nats"
 	S3     SnapshotStoreType = "s3"
@@ -113,7 +113,7 @@ type Configuration struct {
 }
 
 var ConfigPathFlag = flag.String("config", "", "Path to configuration file")
-var CleanupFlag = flag.Bool("cleanup", false, "Only cleanup marmot triggers and changelogs")
+var CleanupFlag = flag.Bool("cleanup", false, "Only cleanup harmonylite triggers and changelogs")
 var SaveSnapshotFlag = flag.Bool("save-snapshot", false, "Only take snapshot and upload")
 var ClusterAddrFlag = flag.String("cluster-addr", "", "Cluster listening address")
 var ClusterPeersFlag = flag.String("cluster-peers", "", "Comma separated list of clusters")
@@ -123,7 +123,7 @@ var ProfServer = flag.String("pprof", "", "PProf listening address")
 var DataRootDir = os.TempDir()
 var Config = &Configuration{
 	SeqMapPath:      path.Join(DataRootDir, "seq-map.cbor"),
-	DBPath:          path.Join(DataRootDir, "marmot.db"),
+	DBPath:          path.Join(DataRootDir, "harmonylite.db"),
 	NodeID:          0,
 	Publish:         true,
 	Replicate:       true,
@@ -154,8 +154,8 @@ var Config = &Configuration{
 
 	NATS: NATSConfiguration{
 		URLs:                 []string{},
-		SubjectPrefix:        "marmot-change-log",
-		StreamPrefix:         "marmot-changes",
+		SubjectPrefix:        "harmonylite-change-log",
+		StreamPrefix:         "harmonylite-changes",
 		ServerConfigFile:     "",
 		SeedFile:             "",
 		CredsPassword:        "",
@@ -173,7 +173,7 @@ var Config = &Configuration{
 	Prometheus: PrometheusConfiguration{
 		Bind:      ":3010",
 		Enable:    false,
-		Namespace: "marmot",
+		Namespace: "harmonylite",
 		Subsystem: "",
 	},
 }

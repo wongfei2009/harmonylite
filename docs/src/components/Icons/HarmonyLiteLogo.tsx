@@ -5,7 +5,7 @@ type Props = React.SVGProps<SVGSVGElement> & {
   height?: number | string;
 };
 
-function MarmotLogo(props: Props) {
+function HarmonyLiteLogo(props: Props) {
   const { width = 200, height = 200 } = props;
   return (
     <svg width={width} height={height} viewBox="0 0 1168.4 650.4" {...props}>
@@ -17,5 +17,5 @@ function MarmotLogo(props: Props) {
   );
 }
 
-const MemoMarmotLogo = React.memo(MarmotLogo);
-export default MemoMarmotLogo;
+const MemoHarmonyLiteLogo = React.memo(HarmonyLiteLogo);
+export default MemoHarmonyLiteLogo;

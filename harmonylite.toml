@@ -1,12 +1,12 @@
 # Path to target SQLite database
-db_path="/tmp/marmot.db"
+db_path="/tmp/harmonylite.db"
 
 # ID to uniquely identify your nodes in your cluster
 # It's recommended to always configure this
 # node_id=1
 
 # Path to persist the saved sequence map on disk for warm reboot
-# If this file is missing Marmot has to download snapshot
+# If this file is missing HarmonyLite has to download snapshot
 # and replay all logs in order to restore database
 # seq_map_path="/tmp/seq-map.cbor"
 
@@ -18,7 +18,7 @@ db_path="/tmp/marmot.db"
 # This will allow process to control publishing of local DB changes to NATS
 # publish = true
 
-# Number of maximum rows to process per change allows configuring the maximum number of rows Marmot
+# Number of maximum rows to process per change allows configuring the maximum number of rows HarmonyLite
 # will process (scan/load in memory) before publishing to NATS (default: 512)
 # scan_max_changes = 512
 
@@ -65,31 +65,31 @@ replicas=1
 endpoint="127.0.0.1:9000"
 
 # Directory path within bucket where snapshot is saved and restore from
-path="snapshots/marmot"
+path="snapshots/harmonylite"
 
 # By default false but should be set to true depending upong Minio configuration, for S3 it should be
 # always true. This essentially lets you select between https and http for your hosting.
 use_ssl=false
 
 # Access key ID or Minio user name
-#access_key="marmot"
+#access_key="harmonylite"
 
 # Secret Key or Minio password
 #secret="ChangeMe"
 
 # Bucket name where snapshots live
-bucket="marmot"
+bucket="harmonylite"
 
 [snapshot.webdav]
 # URL of the WebDAV server root
-url="https://<webdav_server>/<web_dav_path>?dir=/snapshots/path/for/marmot&login=<username>&secret=<password>"
+url="https://<webdav_server>/<web_dav_path>?dir=/snapshots/path/for/harmonylite&login=<username>&secret=<password>"
 
 [snapshot.sftp]
 # URL of the SFTP server with path
 url="sftp://<user>:<password>@<sftp_server>:<port>/path/to/save/snapshot"
 
-# Change log that is published and persisted in JetStreams by Marmot.
-# Marmot auto-configures missing JetStreams when booting up for you.
+# Change log that is published and persisted in JetStreams by HarmonyLite.
+# HarmonyLite auto-configures missing JetStreams when booting up for you.
 [replication_log]
 # Number of replicas per log to configure (user > 1 for failover and redundancy).
 replicas=1
@@ -112,7 +112,7 @@ update_existing=false
 [nats]
 # List of NATS server to use as boot server. Reference NATS documentation on how to pass
 # authentication credentials as part of URL. Leaving out this list empty will result
-# in embedded NATS server being started with node named `marmot-node-{node_id}`. 
+# in embedded NATS server being started with node named `harmonylite-node-{node_id}`. 
 # NATS configuration can provided via `server_config` variable
 urls=[
 #    "nats://localhost:4222"
@@ -124,10 +124,10 @@ bind_address="0.0.0.0:4222"
 server_config=""
 # Subject prefix used when publishing log entries, it's usually suffixed by shard number
 # to get the full subject name
-subject_prefix="marmot-change-log"
+subject_prefix="harmonylite-change-log"
 # JetStream name prefix used for publishing log entries, it's usually suffixed by shard number
 # to get the full JetStream name
-stream_prefix="marmot-changes"
+stream_prefix="harmonylite-changes"
 # Seed file used for client nkey authentication
 # nk -gen user > user.seed
 # nk -inkey user.seed -pubout > user.pub
@@ -147,7 +147,7 @@ reconnect_wait_seconds=2
 enable=false
 # HTTP endpoint to expose for prometheus matrix collection
 # bind=":3010"
-# Namespace for prometheus (default: `marmot`), applies to all counters, gaugues, histograms
+# Namespace for prometheus (default: `harmonylite`), applies to all counters, gaugues, histograms
 # namespace=""
 # Subsystem for prometheus (default: empty), applies to all counters, gauges, histograms
 # subsystem=""

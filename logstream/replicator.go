@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/maxpert/marmot/stream"
+	"github.com/wongfei2009/harmonylite/stream"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/maxpert/marmot/cfg"
-	"github.com/maxpert/marmot/snapshot"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/cfg"
+	"github.com/wongfei2009/harmonylite/snapshot"
 )
 
 const maxReplicateRetries = 7

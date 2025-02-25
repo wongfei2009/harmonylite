@@ -1,4 +1,4 @@
-module github.com/wongfei2009/marmot
+module github.com/wongfei2009/harmonylite
 
 go 1.22.0
 

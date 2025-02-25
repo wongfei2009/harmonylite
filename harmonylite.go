@@ -10,13 +10,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/maxpert/marmot/telemetry"
-	"github.com/maxpert/marmot/utils"
+	"github.com/wongfei2009/harmonylite/telemetry"
+	"github.com/wongfei2009/harmonylite/utils"
 
-	"github.com/maxpert/marmot/cfg"
-	"github.com/maxpert/marmot/db"
-	"github.com/maxpert/marmot/logstream"
-	"github.com/maxpert/marmot/snapshot"
+	"github.com/wongfei2009/harmonylite/cfg"
+	"github.com/wongfei2009/harmonylite/db"
+	"github.com/wongfei2009/harmonylite/logstream"
+	"github.com/wongfei2009/harmonylite/snapshot"
 
 	"github.com/asaskevich/EventBus"
 	"github.com/rs/zerolog"

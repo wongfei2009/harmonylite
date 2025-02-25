@@ -2,7 +2,7 @@ package logstream
 
 import (
 	"github.com/fxamacker/cbor/v2"
-	"github.com/maxpert/marmot/core"
+	"github.com/wongfei2009/harmonylite/core"
 )
 
 type ReplicationEvent[T core.ReplicableEvent[T]] struct {

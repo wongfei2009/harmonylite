@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/maxpert/marmot/cfg"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/cfg"
 )
 
 type s3Storage struct {

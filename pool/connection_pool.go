@@ -123,7 +123,7 @@ func OpenRaw(dns string) (*sql.DB, *sqlite3.SQLiteConn, error) {
 	d := &sqlite3.SQLiteDriver{
 		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
 			rawConn = conn
-			return conn.RegisterFunc("marmot_version", func() string {
+			return conn.RegisterFunc("harmonylite_version", func() string {
 				return "0.1"
 			}, true)
 		},

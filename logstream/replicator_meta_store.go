@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/maxpert/marmot/cfg"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/cfg"
 )
 
 type replicatorMetaStore struct {

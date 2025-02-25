@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/maxpert/marmot/cfg"
+	"github.com/wongfei2009/harmonylite/cfg"
 )
 
 var ErrNotInitialized = errors.New("not initialized")

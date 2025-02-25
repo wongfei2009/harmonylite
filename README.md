@@ -111,7 +111,6 @@ go build
 ```bash
 export CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness"
 go build
-go install
 ginkgo tests/e2e
 ```
 

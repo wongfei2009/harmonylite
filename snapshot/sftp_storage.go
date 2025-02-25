@@ -6,9 +6,9 @@ import (
 	"os"
 	"path"
 
-	"github.com/maxpert/marmot/cfg"
 	"github.com/pkg/sftp"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/cfg"
 	"golang.org/x/crypto/ssh"
 )
 

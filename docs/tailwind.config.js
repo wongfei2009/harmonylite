@@ -4,7 +4,7 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        "marmot-blue": {
+        "harmonylite-blue": {
           100: "#698EA6",
           200: "#5384A3",
           300: "#437A9D",

@@ -15,7 +15,7 @@ import (
 
 // -- Cluster Management --
 
-// startCluster initializes and starts a 3-node Marmot cluster.
+// startCluster initializes and starts a 3-node HarmonyLite cluster.
 func startCluster() (node1, node2, node3 *exec.Cmd) {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Starting cluster setup...\n")
@@ -29,7 +29,7 @@ func startCluster() (node1, node2, node3 *exec.Cmd) {
 	return node1, node2, node3
 }
 
-// stopNodes gracefully stops the provided Marmot nodes.
+// stopNodes gracefully stops the provided HarmonyLite nodes.
 func stopNodes(nodes ...*exec.Cmd) {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Stopping nodes...\n")
@@ -48,7 +48,7 @@ func stopNodes(nodes ...*exec.Cmd) {
 	GinkgoWriter.Printf("Nodes stopped\n")
 }
 
-// startNode launches a Marmot node and performs a NATS health check.
+// startNode launches a HarmonyLite node and performs a NATS health check.
 func startNode(config, addr, peers string) *exec.Cmd {
 	defer GinkgoRecover()
 	GinkgoWriter.Printf("Starting node with config %s, addr %s, peers %s\n", config, addr, peers)
@@ -57,7 +57,7 @@ func startNode(config, addr, peers string) *exec.Cmd {
 	Expect(err).To(BeNil())
 	wd = wd[:len(wd)-len("/tests/e2e")]
 
-	cmd := exec.Command(filepath.Join(wd, "marmot"), "-config", config, "-cluster-addr", addr, "-cluster-peers", peers)
+	cmd := exec.Command(filepath.Join(wd, "harmonylite"), "-config", config, "-cluster-addr", addr, "-cluster-peers", peers)
 	cmd.Dir = wd
 	cmd.Stdout = GinkgoWriter
 	cmd.Stderr = GinkgoWriter
@@ -106,9 +106,9 @@ func waitForNATSHealth(addr string) {
 func cleanup() {
 	defer GinkgoRecover()
 	patterns := []string{
-		filepath.Join(dbDir, "marmot-1*"),
-		filepath.Join(dbDir, "marmot-2*"),
-		filepath.Join(dbDir, "marmot-3*"),
+		filepath.Join(dbDir, "harmonylite-1*"),
+		filepath.Join(dbDir, "harmonylite-2*"),
+		filepath.Join(dbDir, "harmonylite-3*"),
 		filepath.Join(dbDir, "nats"), // Remove the nats directory as well
 	}
 	for _, pattern := range patterns {

@@ -22,10 +22,10 @@ EOF
     echo "Created $db_file"
 }
 
-rm -rf /tmp/marmot-1-* /tmp/marmot-2-* /tmp/marmot-3-*
-create_db /tmp/marmot-1.db
-create_db /tmp/marmot-2.db
-create_db /tmp/marmot-3.db
+rm -rf /tmp/harmonylite-1-* /tmp/harmonylite-2-* /tmp/harmonylite-3-*
+create_db /tmp/harmonylite-1.db
+create_db /tmp/harmonylite-2.db
+create_db /tmp/harmonylite-3.db
 
 
 cleanup() {
@@ -34,15 +34,15 @@ cleanup() {
 
 trap cleanup EXIT
 rm -rf /tmp/nats
-./marmot -config examples/node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/' &
+./harmonylite -config examples/node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/' &
 job1=$!
 
 sleep 1
-./marmot -config examples/node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/' &
+./harmonylite -config examples/node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/' &
 job2=$!
 
 sleep 1
-./marmot -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
+./harmonylite -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
 job3=$!
 
 wait $job1 $job2 $job3

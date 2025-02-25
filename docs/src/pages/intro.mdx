@@ -1,14 +1,14 @@
 ---
-title: Marmot - Introduction
+title: HarmonyLite - Introduction
 ---
 
 # What & Why?
 
-Marmot is a distributed SQLite replicator with leaderless, and eventual consistency. It allows you to build a robust replication
+HarmonyLite is a distributed SQLite replicator with leaderless, and eventual consistency. It allows you to build a robust replication
 between your nodes by building on top of fault-tolerant [NATS JetStream](https://nats.io/).
 
 So if you are running a read heavy website based on SQLite, you should be easily able to scale it out by adding more SQLite replicated nodes.
-SQLite is probably the most ubiquitous DB that exists almost everywhere, Marmot aims to make it even more ubiquitous for server
+SQLite is probably the most ubiquitous DB that exists almost everywhere, HarmonyLite aims to make it even more ubiquitous for server
 side applications by building a replication layer on top.
 
 ## Why?
@@ -19,23 +19,23 @@ you should be easily able to scale it out by adding more nodes of your app with 
 
 ## Quick Start
 
-Download [latest](https://github.com/maxpert/marmot/releases/latest) Marmot and extract package using:
+Download [latest](https://github.com/wongfei2009/harmonylite/releases/latest) HarmonyLite and extract package using:
 
 ```
-tar vxzf marmot-v*.tar.gz
+tar vxzf harmonylite-v*.tar.gz
 ```
 
-From extracted directory run `examples/run-cluster.sh`. Make a change in `/tmp/marmot-1.db` using:
+From extracted directory run `examples/run-cluster.sh`. Make a change in `/tmp/harmonylite-1.db` using:
 
 ```
-bash > sqlite3 /tmp/marmot-1.db
+bash > sqlite3 /tmp/harmonylite-1.db
 sqlite3 > INSERT INTO Books (title, author, publication_year) VALUES ('Pride and Prejudice', 'Jane Austen', 1813);
 ```
 
-Now observe changes getting propagated to other database `/tmp/marmot-2.db`:
+Now observe changes getting propagated to other database `/tmp/harmonylite-2.db`:
 
 ```
-bash > sqlite3 /tmp/marmot-2.db
+bash > sqlite3 /tmp/harmonylite-2.db
 sqlite3 > SELECT * FROM Books;
 ```
 
@@ -51,7 +51,7 @@ For more complicated demos, checkout following (older versions):
 
 ## What is the difference from others?
 
-Marmot is essentially a CDC (Change Data Capture) and replication pipeline running top of NATS. It can automatically configure appropriate
+HarmonyLite is essentially a CDC (Change Data Capture) and replication pipeline running top of NATS. It can automatically configure appropriate
 JetStreams making sure those streams evenly distribute load over those shards, so scaling simply boils down to adding more nodes, and
 re-balancing those JetStreams (auto re-balancing not implemented yet).
 
@@ -62,9 +62,9 @@ replication; or intercept physical page level writes to stream them off to repli
 cases they require a single primary node where all the writes have to go, and then these
 changes are applied to multiple readonly replicas.
 
-Marmot on the other hand is born different. It's born to act as a side-car to your existing processes:
+HarmonyLite on the other hand is born different. It's born to act as a side-car to your existing processes:
  - Instead of requiring single primary, there is no primary! Which means any node can make changes to its local DB.
-   Marmot will use triggers to capture your changes (hence atomic records), and then stream them off to NATS.
+   HarmonyLite will use triggers to capture your changes (hence atomic records), and then stream them off to NATS.
  - Instead of being strongly consistent, it's eventually consistent. Which means no locking, or blocking of nodes.
  - It does not require any changes to your application logic for reading/writing.
 
@@ -79,7 +79,7 @@ Making these choices has multiple benefits:
 
 ### What happens when there is a race condition?
 
-In Marmot every row is uniquely mapped to a JetStream. This guarantees that for any node to publish changes for a row it
+In HarmonyLite every row is uniquely mapped to a JetStream. This guarantees that for any node to publish changes for a row it
 has to go through same JetStream as everyone else. If two nodes perform a change to same row in parallel, both of the
 nodes will compete to publish their change to JetStream cluster. Due to
 [RAFT quorum](https://docs.nats.io/running-a-nats-service/configuration/clustering/jetstream_clustering#raft)
@@ -97,8 +97,8 @@ Disk space is usually the cheapest part of modern cloud, so it should not be a h
 
 ### How do I cleanup my database?
 
-Ask marmot to remove hooks and log tables by:
-`marmot -config /path/to/config.toml -cleanup`
+Ask harmonylite to remove hooks and log tables by:
+`harmonylite -config /path/to/config.toml -cleanup`
 
 ### How many shards should I have?
 
@@ -107,7 +107,7 @@ scaling won't be a problem, your write throughput will depend on your network an
 the biggest culprit). Shards are there to alleviate the problem when you are writing fast enough to cause
 bottleneck by NATS JetStream (very unlikely with a commodity SQLite node).
 
-### Can I use Marmot as single primary and multiple replicas?
+### Can I use HarmonyLite as single primary and multiple replicas?
 
 Yes you can. There are two flags in configuration that will allow you to do that. First flag `publish`
 enables/disables publishing local changes to NATS, you should disable `publish` (set it to `false`)

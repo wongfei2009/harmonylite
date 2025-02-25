@@ -4,13 +4,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/maxpert/marmot/cfg"
-	"github.com/maxpert/marmot/stream"
 	"github.com/nats-io/nats.go"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/cfg"
+	"github.com/wongfei2009/harmonylite/stream"
 )
 
-const hashHeaderKey = "marmot-snapshot-tag"
+const hashHeaderKey = "harmonylite-snapshot-tag"
 
 type natsStorage struct {
 	nc *nats.Conn

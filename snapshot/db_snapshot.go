@@ -10,14 +10,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maxpert/marmot/db"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/db"
 )
 
 var ErrPendingSnapshot = errors.New("system busy capturing snapshot")
 
 const snapshotFileName = "snapshot.db"
-const tempDirPattern = "marmot-snapshot-*"
+const tempDirPattern = "harmonylite-snapshot-*"
 
 type NatsDBSnapshot struct {
 	mutex   *sync.Mutex

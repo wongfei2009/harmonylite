@@ -12,5 +12,5 @@ import (
 // Run e2e tests using the Ginkgo runner.
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Marmot E2E Suite")
+	RunSpecs(t, "HarmonyLite E2E Suite")
 }

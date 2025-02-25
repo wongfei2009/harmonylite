@@ -3,8 +3,8 @@ package utils
 import (
 	"time"
 
-	"github.com/maxpert/marmot/telemetry"
 	"github.com/rs/zerolog"
+	"github.com/wongfei2009/harmonylite/telemetry"
 )
 
 type StopWatch struct {

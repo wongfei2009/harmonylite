@@ -4,7 +4,7 @@
  */
 const nextConfig = {
   reactStrictMode: true,
-  basePath: "/marmot",
+  basePath: "/harmonylite",
 };
 
 const withNextra = require("nextra")({

@@ -13,15 +13,15 @@ import (
 	"github.com/doug-martin/goqu/v9"
 	"github.com/fsnotify/fsnotify"
 	"github.com/mattn/go-sqlite3"
-	"github.com/maxpert/marmot/pool"
-	"github.com/maxpert/marmot/telemetry"
 	"github.com/rs/zerolog/log"
+	"github.com/wongfei2009/harmonylite/pool"
+	"github.com/wongfei2009/harmonylite/telemetry"
 )
 
 const snapshotTransactionMode = "exclusive"
 
 var PoolSize = 4
-var MarmotPrefix = "__marmot__"
+var HarmonyLitePrefix = "__harmonylite__"
 
 type statsSqliteStreamDB struct {
 	published      telemetry.Counter
@@ -148,7 +148,7 @@ func OpenStreamDB(path string) (*SqliteStreamDB, error) {
 	ret := &SqliteStreamDB{
 		pool:              dbPool,
 		dbPath:            path,
-		prefix:            MarmotPrefix,
+		prefix:            HarmonyLitePrefix,
 		publishLock:       &sync.Mutex{},
 		watchTablesSchema: map[string][]*ColumnInfo{},
 		stats: &statsSqliteStreamDB{
@@ -207,13 +207,13 @@ func (conn *SqliteStreamDB) RemoveCDC(tables bool) error {
 	defer sqlConn.Return()
 
 	log.Info().Msg("Uninstalling all CDC triggers...")
-	err = removeMarmotTriggers(sqlConn.DB(), conn.prefix)
+	err = removeHarmonyLiteTriggers(sqlConn.DB(), conn.prefix)
 	if err != nil {
 		return err
 	}
 
 	if tables {
-		return removeMarmotTables(sqlConn.DB(), conn.prefix)
+		return removeHarmonyLiteTables(sqlConn.DB(), conn.prefix)
 	}
 
 	return nil
@@ -304,19 +304,19 @@ func (conn *SqliteStreamDB) BackupTo(bkFilePath string) error {
 	}
 
 	// Now since we have separate copy of DB we don't need to deal with WAL journals or foreign keys
-	// We need to remove all the marmot specific tables, triggers, and vacuum out the junk.
+	// We need to remove all the harmonylite specific tables, triggers, and vacuum out the junk.
 	sqlDB, rawDB, err = pool.OpenRaw(fmt.Sprintf("%s?_foreign_keys=false&_journal_mode=TRUNCATE", bkFilePath))
 	if err != nil {
 		return err
 	}
 
 	gSQL := goqu.New("sqlite", sqlDB)
-	err = removeMarmotTriggers(gSQL, conn.prefix)
+	err = removeHarmonyLiteTriggers(gSQL, conn.prefix)
 	if err != nil {
 		return err
 	}
 
-	err = removeMarmotTables(gSQL, conn.prefix)
+	err = removeHarmonyLiteTables(gSQL, conn.prefix)
 	if err != nil {
 		return err
 	}
@@ -391,7 +391,7 @@ func listDBTables(names *[]string, gSQL *goqu.TxDatabase) error {
 	err := gSQL.Select("name").From("sqlite_schema").Where(
 		goqu.C("type").Eq("table"),
 		goqu.C("name").NotLike("sqlite_%"),
-		goqu.C("name").NotLike(MarmotPrefix+"%"),
+		goqu.C("name").NotLike(HarmonyLitePrefix+"%"),
 	).ScanVals(names)
 
 	if err != nil {

@@ -17,7 +17,7 @@ CREATE INDEX IF NOT EXISTS {{$ChangeLogTableName}}_state_index ON {{$ChangeLogTa
 DROP TRIGGER IF EXISTS {{$ChangeLogTableName}}_on_{{$trigger}};
 CREATE TRIGGER IF NOT EXISTS {{$ChangeLogTableName}}_on_{{$trigger}}
 AFTER {{$trigger}} ON {{$.TableName}}
-WHEN (SELECT COUNT(*) FROM pragma_function_list WHERE name='marmot_version') < 1
+WHEN (SELECT COUNT(*) FROM pragma_function_list WHERE name='harmonylite_version') < 1
 BEGIN
 
     INSERT INTO {{$ChangeLogTableName}}(

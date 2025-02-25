@@ -14,7 +14,7 @@ import (
 
 var wd string
 
-var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
+var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 	var node1, node2, node3 *exec.Cmd
 
 	BeforeAll(func() {
@@ -26,7 +26,7 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 
 		// Create databases with both tables
 		for i := 1; i <= 3; i++ {
-			dbPath := filepath.Join(dbDir, fmt.Sprintf("marmot-%d.db", i))
+			dbPath := filepath.Join(dbDir, fmt.Sprintf("harmonylite-%d.db", i))
 			createDatabase(dbPath)     // Creates Books table
 			createAuthorsTable(dbPath) // Creates Authors table
 		}
@@ -40,49 +40,49 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 
 	Context("Basic Replication", func() {
 		It("should replicate INSERT operations", func() {
-			id := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Pride and Prejudice", "Jane Austen", 1813)
+			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Pride and Prejudice", "Jane Austen", 1813)
 			Eventually(func() int {
-				return countBooksByTitle(filepath.Join(dbDir, "marmot-2.db"), "Pride and Prejudice")
+				return countBooksByTitle(filepath.Join(dbDir, "harmonylite-2.db"), "Pride and Prejudice")
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Insert replication failed")
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-3.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Insert not replicated to node 3")
 		})
 
 		It("should replicate UPDATE operations", func() {
-			id := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Update Test", "Author", 2020)
+			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Update Test", "Author", 2020)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Initial insert not replicated for update")
-			updateBookTitle(filepath.Join(dbDir, "marmot-1.db"), id, "Updated Title")
+			updateBookTitle(filepath.Join(dbDir, "harmonylite-1.db"), id, "Updated Title")
 			Eventually(func() string {
-				return getBookTitle(filepath.Join(dbDir, "marmot-2.db"), id)
+				return getBookTitle(filepath.Join(dbDir, "harmonylite-2.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal("Updated Title"), "Update replication failed")
 			Eventually(func() string {
-				return getBookTitle(filepath.Join(dbDir, "marmot-3.db"), id)
+				return getBookTitle(filepath.Join(dbDir, "harmonylite-3.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal("Updated Title"), "Update not replicated to node 3")
 		})
 
 		It("should replicate DELETE operations", func() {
-			id := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Delete Test", "Author", 2020)
+			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Delete Test", "Author", 2020)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Initial insert not replicated for delete")
-			deleteBookByID(filepath.Join(dbDir, "marmot-1.db"), id)
+			deleteBookByID(filepath.Join(dbDir, "harmonylite-1.db"), id)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(0), "Delete replication failed")
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-3.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(0), "Delete not replicated to node 3")
 		})
 	})
 
 	Context("Concurrency and Conflict Resolution", func() {
 		It("should resolve concurrent updates using last-writer-wins", func() {
-			id := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Conflict Test", "Author", 2020)
+			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Conflict Test", "Author", 2020)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Initial insert not replicated for conflict test")
 
 			var wg sync.WaitGroup
@@ -90,20 +90,20 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
-				updateBookTitle(filepath.Join(dbDir, "marmot-1.db"), id, "Node1 Update")
+				updateBookTitle(filepath.Join(dbDir, "harmonylite-1.db"), id, "Node1 Update")
 			}()
 			go func() {
 				defer GinkgoRecover()
 				defer wg.Done()
 				time.Sleep(100 * time.Millisecond) // Ensure Node2 writes last
-				updateBookTitle(filepath.Join(dbDir, "marmot-2.db"), id, "Node2 Update")
+				updateBookTitle(filepath.Join(dbDir, "harmonylite-2.db"), id, "Node2 Update")
 			}()
 			wg.Wait()
 
 			Eventually(func() bool {
-				t1 := getBookTitle(filepath.Join(dbDir, "marmot-1.db"), id)
-				t2 := getBookTitle(filepath.Join(dbDir, "marmot-2.db"), id)
-				t3 := getBookTitle(filepath.Join(dbDir, "marmot-3.db"), id)
+				t1 := getBookTitle(filepath.Join(dbDir, "harmonylite-1.db"), id)
+				t2 := getBookTitle(filepath.Join(dbDir, "harmonylite-2.db"), id)
+				t3 := getBookTitle(filepath.Join(dbDir, "harmonylite-3.db"), id)
 				consistent := t1 == "Node2 Update" && t2 == "Node2 Update" && t3 == "Node2 Update"
 				GinkgoWriter.Printf("Conflict check - Node1: %s, Node2: %s, Node3: %s\n", t1, t2, t3)
 				return consistent
@@ -114,15 +114,15 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 	Context("Snapshot and Restore", func() {
 		It("should save and restore snapshots correctly", func() {
 			// Insert data before snapshot
-			id := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Snapshot Test", "Author", 2020)
+			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Snapshot Test", "Author", 2020)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Initial insert not replicated for snapshot test")
 
 			// Stop node 3, save snapshot, and restart
 			stopNodes(node3)
 			time.Sleep(2 * time.Second) // Allow snapshot to be taken
-			node3Cmd := exec.Command(filepath.Join(wd, "marmot"), "-config", "examples/node-3-config.toml", "-save-snapshot")
+			node3Cmd := exec.Command(filepath.Join(wd, "harmonylite"), "-config", "examples/node-3-config.toml", "-save-snapshot")
 			node3Cmd.Dir = wd
 			node3Cmd.Stdout = GinkgoWriter
 			node3Cmd.Stderr = GinkgoWriter
@@ -131,7 +131,7 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 
 			// Verify restored data
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-3.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), id)
 			}, maxWaitTime*2, pollInterval).Should(Equal(1), "Snapshot restore failed on node 3")
 		})
 	})
@@ -139,9 +139,9 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 	Context("Node Failure and Recovery", func() {
 		It("should recover replication after node failure", func() {
 			// Insert initial data
-			id := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Failure Test", "Author", 2020)
+			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Failure Test", "Author", 2020)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-3.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), id)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Initial insert not replicated for failure test")
 
 			// Simulate node 3 failure
@@ -149,15 +149,15 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 			time.Sleep(2 * time.Second) // Allow some time for failure to propagate
 
 			// Insert more data while node 3 is down
-			id2 := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Post-Failure Test", "Author", 2021)
+			id2 := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Post-Failure Test", "Author", 2021)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id2)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id2)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Insert not replicated to node 2 during node 3 downtime")
 
 			// Restart node 3
 			node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/")
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-3.db"), id2)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), id2)
 			}, maxWaitTime*2, pollInterval).Should(Equal(1), "Node 3 failed to recover replication after restart")
 		})
 	})
@@ -167,21 +167,21 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 		})
 
 		It("should replicate changes across multiple tables", func() {
-			bookID := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Multi-Table Book", "Jane Austen", 1813)
-			authorID := insertAuthor(filepath.Join(dbDir, "marmot-1.db"), "Jane Austen", 1775)
+			bookID := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Multi-Table Book", "Jane Austen", 1813)
+			authorID := insertAuthor(filepath.Join(dbDir, "harmonylite-1.db"), "Jane Austen", 1775)
 
 			Eventually(func() int {
-				return countBooksByTitle(filepath.Join(dbDir, "marmot-2.db"), "Multi-Table Book")
+				return countBooksByTitle(filepath.Join(dbDir, "harmonylite-2.db"), "Multi-Table Book")
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Book replication failed across tables")
 			Eventually(func() int {
-				return countAuthorsByName(filepath.Join(dbDir, "marmot-2.db"), "Jane Austen")
+				return countAuthorsByName(filepath.Join(dbDir, "harmonylite-2.db"), "Jane Austen")
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Author replication failed across tables")
 
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-3.db"), bookID)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), bookID)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Book not replicated to node 3")
 			Eventually(func() int {
-				return countAuthorsByID(filepath.Join(dbDir, "marmot-3.db"), authorID)
+				return countAuthorsByID(filepath.Join(dbDir, "harmonylite-3.db"), authorID)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Author not replicated to node 3")
 		})
 	})
@@ -191,14 +191,14 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 			const numRecords = 100
 			var ids []int64
 			for i := 0; i < numRecords; i++ {
-				id := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Bulk Test "+string(rune(i)), "Author", 2020+i)
+				id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Bulk Test "+string(rune(i)), "Author", 2020+i)
 				ids = append(ids, id)
 			}
 
 			Eventually(func() int {
 				count := 0
 				for _, id := range ids {
-					count += countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id)
+					count += countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id)
 				}
 				return count
 			}, maxWaitTime*2, pollInterval).Should(Equal(numRecords), "Failed to replicate all records to node 2")
@@ -206,7 +206,7 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 			Eventually(func() int {
 				count := 0
 				for _, id := range ids {
-					count += countBooksByID(filepath.Join(dbDir, "marmot-3.db"), id)
+					count += countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), id)
 				}
 				return count
 			}, maxWaitTime*2, pollInterval).Should(Equal(numRecords), "Failed to replicate all records to node 3")
@@ -229,7 +229,7 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 			Expect(err).To(BeNil(), "Failed to write modified config file")
 
 			// Start node 2 with the modified config
-			node2 = exec.Command(filepath.Join(wd, "marmot"),
+			node2 = exec.Command(filepath.Join(wd, "harmonylite"),
 				"-config", tmpConfigPath,
 				"-cluster-addr", "127.0.0.1:4222",
 				"-cluster-peers", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/")
@@ -239,15 +239,15 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 			Expect(node2.Start()).To(Succeed(), "Failed to start node 2 with publish disabled")
 
 			// Insert on node 2 (should not replicate)
-			id := insertBook(filepath.Join(dbDir, "marmot-2.db"), "No Publish Test", "Author", 2020)
+			id := insertBook(filepath.Join(dbDir, "harmonylite-2.db"), "No Publish Test", "Author", 2020)
 			Consistently(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-1.db"), id)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-1.db"), id)
 			}, 5*time.Second, pollInterval).Should(Equal(0), "Data replicated from node 2 despite publish disabled")
 
 			// Insert on node 1 (should replicate to node 2)
-			id2 := insertBook(filepath.Join(dbDir, "marmot-1.db"), "Publish Test", "Author", 2020)
+			id2 := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Publish Test", "Author", 2020)
 			Eventually(func() int {
-				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id2)
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id2)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Data not replicated to node 2 with publish disabled")
 
 			// Clean up

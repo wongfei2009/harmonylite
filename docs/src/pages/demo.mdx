@@ -1,11 +1,11 @@
 ---
-title: Marmot + Isso Demo
+title: HarmonyLite + Isso Demo
 ---
 
-## What is Marmot?
+## What is HarmonyLite?
 
-[Marmot](https://github.com/maxpert/marmot) is a distributed SQLite replicator that runs as a side-car to you service, and replicates 
-data across cluster using embedded NATS. Marmot relies on [JetStream](https://docs.nats.io/nats-concepts/jetstream)
+[HarmonyLite](https://github.com/wongfei2009/harmonylite) is a distributed SQLite replicator that runs as a side-car to you service, and replicates 
+data across cluster using embedded NATS. HarmonyLite relies on [JetStream](https://docs.nats.io/nats-concepts/jetstream)
 based CDC (Change Data Capture) to replicate changes. JetStream under the hood uses RAFT for consensus
 and allows for eventually consistent SQLite replicas (multi-primary replication).
 
@@ -24,12 +24,12 @@ engine for Lambda and Fargate.
 
 This demo effectively shows how Isso can be scaled out and pushed closer to the edge. Many out of box SQLite tools can be scaled 
 similarly. Your fly.io nodes scale up or down based on traffic, and write from everywhere. This allows horizontal scalability
-of your Isso close to the user. With NATS embedded into Marmot, a sharded RAFT is used to capture changes, and replay them 
-across the fly nodes. So if you are running a single node SQLite site you can now add redundancy to that with Marmot.
+of your Isso close to the user. With NATS embedded into HarmonyLite, a sharded RAFT is used to capture changes, and replay them 
+across the fly nodes. So if you are running a single node SQLite site you can now add redundancy to that with HarmonyLite.
 
 ## How do I configure one for myself?
 
-You can access code and follow the instructions [here](https://gitlab.com/maxpert/marmot-denokv).
+You can access code and follow the instructions [here](https://gitlab.com/wongfei2009/harmonylite-denokv).
 
 ## Demo
 
@@ -37,4 +37,4 @@ You can access code and follow the instructions [here](https://gitlab.com/maxper
     <noscript>Javascript needs to be activated to view comments.</noscript>
 </section>
 
-<script data-isso="//marmot-demo.fly.dev/" src="//marmot-demo.fly.dev/js/embed.min.js"></script>
+<script data-isso="//harmonylite-demo.fly.dev/" src="//harmonylite-demo.fly.dev/js/embed.min.js"></script>
