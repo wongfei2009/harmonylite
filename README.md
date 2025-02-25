@@ -180,6 +180,9 @@ For more details and internal workings of marmot [go to these docs](https://maxp
 ## E2E Test Suite
 
 ```
+export CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness"
+go build
+go install
 ginkgo tests/e2e
 ```
 
