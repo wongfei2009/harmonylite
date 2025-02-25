@@ -214,10 +214,25 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 	})
 
 	Context("Configuration Variations", func() {
-		XIt("should work with publish disabled on one node", func() {
-			// Stop and restart node 2 with publish disabled
+		It("should work with publish disabled on one node", func() {
+			// Stop node 2
 			stopNodes(node2)
-			node2 = exec.Command(filepath.Join(wd, "marmot"), "-config", "examples/node-2-config.toml", "-cluster-addr", "127.0.0.1:4222", "-cluster-peers", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/", "--", "publish=false")
+
+			// Create a temporary config file for node 2 with publish disabled
+			tmpConfigPath := filepath.Join(dbDir, "node-2-disabled-publish.toml")
+			originalConfig, err := os.ReadFile(filepath.Join(wd, "examples/node-2-config.toml"))
+			Expect(err).To(BeNil(), "Failed to read original config file")
+
+			// Append publish=false to the config
+			modifiedConfig := append(originalConfig, []byte("\npublish=false\n")...)
+			err = os.WriteFile(tmpConfigPath, modifiedConfig, 0644)
+			Expect(err).To(BeNil(), "Failed to write modified config file")
+
+			// Start node 2 with the modified config
+			node2 = exec.Command(filepath.Join(wd, "marmot"),
+				"-config", tmpConfigPath,
+				"-cluster-addr", "127.0.0.1:4222",
+				"-cluster-peers", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/")
 			node2.Dir = wd
 			node2.Stdout = GinkgoWriter
 			node2.Stderr = GinkgoWriter
@@ -234,6 +249,9 @@ var _ = Describe("Marmot End-to-End Tests", Ordered, func() {
 			Eventually(func() int {
 				return countBooksByID(filepath.Join(dbDir, "marmot-2.db"), id2)
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Data not replicated to node 2 with publish disabled")
+
+			// Clean up
+			defer os.Remove(tmpConfigPath)
 		})
 	})
 })
