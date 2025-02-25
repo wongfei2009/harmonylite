@@ -2,7 +2,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/wongfei2009/harmonylite)](https://goreportcard.com/report/github.com/wongfei2009/harmonylite)
 ![GitHub](https://img.shields.io/github/license/wongfei2009/harmonylite)
-[![Tests](https://github.com/wongfei2009/harmonylite/actions/workflows/test.yml/badge.svg)](https://github.com/wongfei2009/harmonylite/actions/workflows/tests.yml)
+[![Tests](https://github.com/wongfei2009/harmonylite/actions/workflows/tests.yml/badge.svg)](https://github.com/wongfei2009/harmonylite/actions/workflows/tests.yml)
 
 ## What is HarmonyLite?
 
