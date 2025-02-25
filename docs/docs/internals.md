@@ -1,6 +1,4 @@
-# HarmonyLite: How It Works
-
-import Mermaid from '../components/Mermaid';
+# How It Works
 
 HarmonyLite is a distributed SQLite replication system with a leaderless architecture. This document explains the core components and mechanisms that make it work.
 
@@ -13,7 +11,7 @@ HarmonyLite provides distributed SQLite replication through these key components
 3. **Node Coordination**: Manages replication between distributed nodes
 4. **Snapshot Management**: Handles database state synchronization for new or long-offline nodes
 
-<Mermaid chart={`
+```mermaid
 flowchart TB
     subgraph "Node 1"
         DB1[SQLite DB] --> Triggers1[SQLite Triggers]
@@ -44,7 +42,7 @@ flowchart TB
     class DB1,DB2 sqlite
     class HarmonyLite1,HarmonyLite2 harmony
     class Streams,Objects nats
-`} />
+```
 
 ## Triggers and Data Capture
 
@@ -55,7 +53,7 @@ HarmonyLite captures database changes using SQLite triggers that record modifica
 - **Column mapping**: Change log tables prefix original column names with `val_` (e.g., `id` becomes `val_id`)
 - **Automatic trigger setup**: Triggers are compiled using Go's templating system and installed at boot time
 
-<Mermaid chart={`
+```mermaid
 erDiagram
     USERS {
         int id PK
@@ -81,7 +79,7 @@ erDiagram
     
     USERS ||--o{ USERS_CHANGE_LOG : "triggers create"
     USERS_CHANGE_LOG ||--o{ GLOBAL_CHANGE_LOG : "references"
-`} />
+```
 
 ### Trigger Implementation
 
@@ -126,7 +124,7 @@ When HarmonyLite detects database changes, it follows this workflow:
 8. **Consistency**: Ordering is guaranteed by RAFT consensus at the stream level, ensuring a deterministic sequence
 9. **Last-writer-wins**: When changes conflict, the last change in the cluster-wide commit order takes precedence
 
-<Mermaid chart={`
+```mermaid
 sequenceDiagram
     participant App1 as Application (Node 1)
     participant DB1 as SQLite DB (Node 1)
@@ -154,7 +152,7 @@ sequenceDiagram
     
     App2->>DB2: Read updated data
     DB2->>App2: Return data
-`} />
+```
 
 ## Changelog Format
 
@@ -178,7 +176,7 @@ interface HarmonyLitePublishedRow {
 
 Snapshots enable nodes to recover after lengthy downtimes without replaying all historical changes.
 
-<Mermaid chart={`
+```mermaid
 graph TB
     subgraph "Snapshot Creation"
         A[Monitor Sequence Numbers] --> B{Threshold Reached?}
@@ -191,7 +189,10 @@ graph TB
         G --> H[Update Sequence Map]
         H --> A
     end
+```
 
+```mermaid
+graph TB
     subgraph "Snapshot Restoration"
         I[Node Startup] --> J[Check DB Integrity]
         J --> K[Load Sequence Map]
@@ -204,7 +205,7 @@ graph TB
         P --> Q[Process Recent Changes]
         Q --> R
     end
-`} />
+```
 
 ### Snapshot Frequency
 
@@ -247,7 +248,7 @@ HarmonyLite supports multiple snapshot storage backends:
 - **WebDAV**: For web-based storage systems
 - **SFTP**: For secure file transfers
 
-<Mermaid chart={`
+```mermaid
 flowchart LR
     HarmonyLite[HarmonyLite] --> Storage{Storage Provider}
     Storage -->|Default| NATS[NATS Object Storage]
@@ -262,7 +263,7 @@ flowchart LR
     class HarmonyLite primary
     class Storage default
     class NATS,S3,WebDAV,SFTP provider
-`} />
+```
 
 ## Configuration Example
 
@@ -298,32 +299,6 @@ stream_prefix="harmonylite-changes"
 - **Snapshot Interval**: Balance between recovery speed and storage usage
 - **Cleanup Interval**: Affects how quickly change logs are purged after replication
 
-<Mermaid chart={`
-graph TD
-    subgraph "HarmonyLite Performance Factors"
-        A[Database Size]
-        B[Change Frequency]
-        C[Network Latency]
-        D[Number of Nodes]
-    end
-    
-    subgraph "Tunable Parameters"
-        E[Shard Count]
-        F[Compression]
-        G[Snapshot Interval]
-        H[Cleanup Interval]
-    end
-    
-    A --> E
-    A --> F
-    B --> E
-    B --> G
-    B --> H
-    C --> G
-    D --> E
-    D --> G
-`} />
-
 ## Monitoring and Troubleshooting
 
 HarmonyLite provides several mechanisms to monitor system health and diagnose problems in a distributed setup.
@@ -349,7 +324,7 @@ Key metrics include:
 | `count_changes` | Histogram | Latency for counting changes in microseconds |
 | `scan_changes` | Histogram | Latency for scanning change rows in microseconds |
 
-<Mermaid chart={`
+```mermaid
 graph LR
     A[HarmonyLite Nodes] -->|expose| B[Prometheus Metrics]
     B -->|scrape| C[Prometheus Server]
@@ -363,7 +338,7 @@ graph LR
     class A component
     class B,C,D monitoring
     class E visualization
-`} />
+```
 
 ### Logging
 
@@ -460,61 +435,8 @@ Since HarmonyLite relies on NATS, monitoring the NATS infrastructure is crucial:
 2. **Stream Information**: Check `http://<nats-server>:8222/jsz` for JetStream details
 3. **Consumer Status**: Review message delivery with `http://<nats-server>:8222/consz`
 
-<Mermaid chart={`
-gantt
-    title HarmonyLite Troubleshooting Workflow
-    dateFormat  YYYY-MM-DD
-    section Initial Checks
-    Verify All Nodes Running           :a1, 2023-01-01, 1d
-    Check NATS Connectivity            :a2, after a1, 1d
-    Review Logs For Errors             :a3, after a2, 1d
-    section Diagnose
-    Monitor Prometheus Metrics         :b1, after a3, 2d
-    Examine NATS Stream State          :b2, after b1, 1d
-    Verify Database Triggers           :b3, after b2, 1d
-    section Resolve
-    Adjust Configuration               :c1, after b3, 2d
-    Restart Problematic Nodes          :c2, after c1, 1d
-    Force Snapshot If Needed           :c3, after c2, 1d
-`} />
-
 ## Advanced Topics
 
 - **Multiple Replica Types**: Configure read-only or write-only nodes
 - **Disaster Recovery**: Strategies for handling catastrophic failures
 - **Scaling**: Adding nodes to a running cluster
-
-<Mermaid chart={`
-flowchart TB
-    subgraph "HarmonyLite Deployment Options"
-        direction LR
-        
-        subgraph "Standard Deployment"
-            A1[Node 1] <--> A2[Node 2]
-            A2 <--> A3[Node 3]
-            A3 <--> A1
-        end
-        
-        subgraph "Read-Heavy Configuration"
-            B1[Writer Node] --> B2[Reader Node 1]
-            B1 --> B3[Reader Node 2]
-            B1 --> B4[Reader Node 3]
-        end
-        
-        subgraph "Regional Deployment"
-            C1[Region A Nodes] <--> C2[Region B Nodes]
-            C2 <--> C3[Region C Nodes]
-            C3 <--> C1
-        end
-    end
-    
-    classDef writer fill:#f9a,stroke:#333,stroke-width:1px
-    classDef reader fill:#adf,stroke:#333,stroke-width:1px
-    classDef standard fill:#ddd,stroke:#333,stroke-width:1px
-    classDef region fill:#bfb,stroke:#333,stroke-width:1px
-    
-    class A1,A2,A3 standard
-    class B1 writer
-    class B2,B3,B4 reader
-    class C1,C2,C3 region
-`} />

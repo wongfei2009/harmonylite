@@ -1,5 +1,7 @@
 ---
-title: HarmonyLite - A Distributed SQLite Replication System
+id: overview
+title: Overview
+slug: /overview
 ---
 
 # What is HarmonyLite?

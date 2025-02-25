@@ -1,8 +1,10 @@
 ---
-title: HarmonyLite Demo
+id: demo
+title: Demo
+slug: /demo
 ---
 
-# HarmonyLite Demo
+# Demo
 
 This page demonstrates HarmonyLite in action with a practical example of distributed SQLite replication.
 
