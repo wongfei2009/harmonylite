@@ -1,19 +1,22 @@
-/* eslint-disable @typescript-eslint/no-var-requires */
-/**
- * @type {import('next').NextConfig}
- */
-const nextConfig = {
-  reactStrictMode: true,
-  basePath: "/harmonylite",
-};
-
+/** @type {import('next').NextConfig} */
 const withNextra = require("nextra")({
   theme: "nextra-theme-docs",
   themeConfig: "./theme.config.js",
   mdxOptions: {
     rehypePlugins: [
-      require('rehype-mermaid')
+      // Use an async function that dynamically imports rehype-mermaid
+      async () => {
+        const rehypeMermaid = await import('rehype-mermaid');
+        return rehypeMermaid.default;
+      }
     ]
   }
 });
+
+const nextConfig = {
+  // Your other Next.js configuration
+  reactStrictMode: true,
+  basePath: "/harmonylite",
+};
+
 module.exports = withNextra(nextConfig);
