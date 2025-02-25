@@ -3,8 +3,11 @@ name: 📕 Deploy docs site to Pages
 on:
   push:
     branches: ["master"]
-
-  workflow_dispatch:
+    paths:
+      - 'docs/**'          # Only run when files in the docs directory change
+      - '.github/workflows/pages.yml'  # Or when this workflow file itself changes
+  
+  workflow_dispatch:  # Keep manual trigger option
 
 permissions:
   contents: read
