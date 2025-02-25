@@ -1,40 +1,97 @@
 ---
-title: HarmonyLite + Isso Demo
+title: HarmonyLite Demo
 ---
 
-## What is HarmonyLite?
+# HarmonyLite Demo
 
-[HarmonyLite](https://github.com/wongfei2009/harmonylite) is a distributed SQLite replicator that runs as a side-car to you service, and replicates 
-data across cluster using embedded NATS. HarmonyLite relies on [JetStream](https://docs.nats.io/nats-concepts/jetstream)
-based CDC (Change Data Capture) to replicate changes. JetStream under the hood uses RAFT for consensus
-and allows for eventually consistent SQLite replicas (multi-primary replication).
+This page demonstrates HarmonyLite in action with a practical example of distributed SQLite replication.
 
-## What is Isso?
+## Demo Overview
 
-[Isso](https://isso-comments.de/) is a commenting system like Disqus. Users can edit or delete own
-comments (within 15 minutes by default). Best part about Isso is that it uses SQLite!
+In this demo, we'll show how HarmonyLite enables:
 
-## What is Fly.io?
+1. Multi-node SQLite replication with no primary server
+2. Automatic synchronization between database instances
+3. Handling of concurrent writes from different locations
 
-Fly is a platform for running full stack apps and databases close to your users. Compute jobs at Fly.io are
-virtualized using Firecracker, the virtualization engine developed at AWS as the
-engine for Lambda and Fargate.
+## Setting Up the Demo Environment
 
-## Why should I care?
+Let's create a simple three-node HarmonyLite cluster locally to see how changes propagate:
 
-This demo effectively shows how Isso can be scaled out and pushed closer to the edge. Many out of box SQLite tools can be scaled 
-similarly. Your fly.io nodes scale up or down based on traffic, and write from everywhere. This allows horizontal scalability
-of your Isso close to the user. With NATS embedded into HarmonyLite, a sharded RAFT is used to capture changes, and replay them 
-across the fly nodes. So if you are running a single node SQLite site you can now add redundancy to that with HarmonyLite.
+```bash
+# Create the demo databases with sample book data
+./harmonylite -config examples/node-1-config.toml -cluster-addr localhost:4221 &
+./harmonylite -config examples/node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/' &
+./harmonylite -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
+```
 
-## How do I configure one for myself?
+After starting the cluster, we'll have three SQLite databases:
+- `/tmp/harmonylite-1.db`
+- `/tmp/harmonylite-2.db`
+- `/tmp/harmonylite-3.db`
 
-You can access code and follow the instructions [here](https://gitlab.com/wongfei2009/harmonylite-denokv).
+## Testing Replication
 
-## Demo
+Now let's see replication in action by making changes to one node and observing them propagate to others:
 
-<section id="isso-thread">
-    <noscript>Javascript needs to be activated to view comments.</noscript>
-</section>
+```bash
+# Insert a new book on node 1
+sqlite3 /tmp/harmonylite-1.db
+> INSERT INTO Books (title, author, publication_year) VALUES ('Dune', 'Frank Herbert', 1965);
+```
 
-<script data-isso="//harmonylite-demo.fly.dev/" src="//harmonylite-demo.fly.dev/js/embed.min.js"></script>
+Within seconds, you can verify the change has propagated to the other nodes:
+
+```bash
+# Check node 2
+sqlite3 /tmp/harmonylite-2.db "SELECT * FROM Books WHERE title='Dune';"
+
+# Check node 3
+sqlite3 /tmp/harmonylite-3.db "SELECT * FROM Books WHERE title='Dune';"
+```
+
+## Concurrent Write Handling
+
+HarmonyLite uses a "last-writer-wins" strategy to handle concurrent writes. Let's demonstrate this:
+
+```bash
+# First, get a book ID to update
+BOOK_ID=$(sqlite3 /tmp/harmonylite-1.db "SELECT id FROM Books LIMIT 1;")
+
+# Update the same book on different nodes nearly simultaneously
+sqlite3 /tmp/harmonylite-1.db "UPDATE Books SET title='Updated on Node 1' WHERE id=$BOOK_ID;"
+
+# Quickly run this on another terminal
+sqlite3 /tmp/harmonylite-2.db "UPDATE Books SET title='Updated on Node 2' WHERE id=$BOOK_ID;"
+```
+
+After a moment, check all three nodes:
+
+```bash
+sqlite3 /tmp/harmonylite-1.db "SELECT title FROM Books WHERE id=$BOOK_ID;"
+sqlite3 /tmp/harmonylite-2.db "SELECT title FROM Books WHERE id=$BOOK_ID;"
+sqlite3 /tmp/harmonylite-3.db "SELECT title FROM Books WHERE id=$BOOK_ID;"
+```
+
+All three should display the same title, which will be the "last-writer" based on JetStream's RAFT consensus.
+
+## Snapshots and Recovery
+
+HarmonyLite can also take snapshots to support faster node recovery. Let's demonstrate:
+
+```bash
+# Stop node 3
+kill %3
+
+# Take a snapshot with node 1
+./harmonylite -config examples/node-1-config.toml -save-snapshot
+
+# Make a change that node 3 will miss while offline
+sqlite3 /tmp/harmonylite-1.db "INSERT INTO Books (title, author, publication_year) VALUES ('New book while offline', 'Some Author', 2023);"
+
+# Restart node 3 - it will automatically recover from snapshot and then catch up with missed changes
+./harmonylite -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
+
+# Verify node 3 has the latest data
+sqlite3 /tmp/harmonylite-3.db "SELECT title FROM Books WHERE title='New book while offline';"
+```
