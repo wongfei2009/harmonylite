@@ -44,6 +44,11 @@ jobs:
       - name: Build HarmonyLite
         run: |
           CGO_ENABLED=1 CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness" go build -o harmonylite .
+          # Make sure the binary is executable
+          chmod +x harmonylite
+          # Print working directory and check if the binary exists
+          pwd
+          ls -la
 
       - name: Run E2E Tests
         run: |
