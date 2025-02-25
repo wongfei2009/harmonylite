@@ -3,13 +3,25 @@ name: Release
 on:
   release:
     types: [created]
+  
   push:
     branches: [master]
+    paths-ignore:
+      - 'docs/**'           # Ignore documentation changes
+      - '**.md'             # Ignore markdown files
+      - '.github/workflows/pages.yml'  # Ignore docs workflow file
+  
   pull_request:
     types:
       - opened
       - synchronize
       - reopened
+    paths-ignore:
+      - 'docs/**'           # Ignore documentation changes
+      - '**.md'             # Ignore markdown files
+      - '.github/workflows/pages.yml'  # Ignore docs workflow file
+
+  workflow_dispatch:        # Allow manual triggering
 
 jobs:
   tests:
@@ -17,6 +29,9 @@ jobs:
 
   linux-build:
     needs: tests
+    # Skip build job on pull requests if they come from forks
+    # This saves CI minutes while still running tests
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -101,8 +116,11 @@ jobs:
           asset_path: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz
           asset_name: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz
           asset_content_type: application/gzip
+          
   mac-build:
     needs: tests
+    # Skip build job on pull requests if they come from forks
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: macos-latest
     strategy:
       matrix:
