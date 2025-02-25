@@ -21,7 +21,9 @@ jobs:
           sudo apt-get install -y sqlite3 libsqlite3-dev
 
       - name: Run unit tests
-        run: go test -v ./...
+        run: |
+          # Run all tests except those in the e2e directory
+          go test -v $(go list ./... | grep -v "/tests/e2e")
 
   e2e-tests:
     runs-on: ubuntu-latest
@@ -52,4 +54,4 @@ jobs:
 
       - name: Run E2E Tests
         run: |
-          ginkgo -v tests/e2e
+           ginkgo -v tests/e2e
