@@ -1,115 +1,122 @@
 ---
-title: HarmonyLite - Introduction
+title: HarmonyLite - A Distributed SQLite Replication System
 ---
 
-# What & Why?
+# What is HarmonyLite?
 
-HarmonyLite is a distributed SQLite replicator with leaderless, and eventual consistency. It allows you to build a robust replication
-between your nodes by building on top of fault-tolerant [NATS JetStream](https://nats.io/).
+HarmonyLite is a distributed SQLite replication system with leaderless architecture and eventual consistency. Built on top of the fault-tolerant [NATS JetStream](https://nats.io/), it enables robust multi-directional replication between database nodes without requiring a primary server.
 
-So if you are running a read heavy website based on SQLite, you should be easily able to scale it out by adding more SQLite replicated nodes.
-SQLite is probably the most ubiquitous DB that exists almost everywhere, HarmonyLite aims to make it even more ubiquitous for server
-side applications by building a replication layer on top.
+## Why HarmonyLite?
 
-## Why?
+SQLite is the world's most widely deployed database engine, embedded in countless applications across all platforms. HarmonyLite extends SQLite's capabilities by:
 
-SQLite is a probably the most ubiquitous DB that exists almost everywhere, this project aims to make it even more ubiquitous for server
-side applications by building a master-less replication layer on top. This means if you are running a read heavy website based on SQLite
-you should be easily able to scale it out by adding more nodes of your app with SQLite replicated nodes.
+- Enabling horizontal scaling for read-heavy applications
+- Supporting multi-directional writes across all nodes
+- Providing eventual consistency with no global locking
+- Running as a lightweight sidecar to your existing processes
+- Requiring zero modifications to your application code
 
-## Quick Start
+## Quick Start Guide
 
-Download [latest](https://github.com/wongfei2009/harmonylite/releases/latest) HarmonyLite and extract package using:
+1. Download the [latest release](https://github.com/wongfei2009/harmonylite/releases/latest) and extract:
 
-```
+```bash
 tar vxzf harmonylite-v*.tar.gz
 ```
 
-From extracted directory run `examples/run-cluster.sh`. Make a change in `/tmp/harmonylite-1.db` using:
+2. Start a demonstration cluster:
 
-```
-bash > sqlite3 /tmp/harmonylite-1.db
-sqlite3 > INSERT INTO Books (title, author, publication_year) VALUES ('Pride and Prejudice', 'Jane Austen', 1813);
-```
-
-Now observe changes getting propagated to other database `/tmp/harmonylite-2.db`:
-
-```
-bash > sqlite3 /tmp/harmonylite-2.db
-sqlite3 > SELECT * FROM Books;
+```bash
+./examples/run-cluster.sh
 ```
 
-You should be able to make changes interchangeably and see the changes getting propagated.
+3. Insert data into the first database:
 
-For more complicated demos, checkout following (older versions):
+```bash
+sqlite3 /tmp/harmonylite-1.db
+sqlite> PRAGMA trusted_schema = ON;
+sqlite> INSERT INTO Books (title, author, publication_year) VALUES ('Pride and Prejudice', 'Jane Austen', 1813);
+```
 
-<center>
-    <iframe width="560" height="315" src="https://www.youtube.com/embed/GQ5x8pc9vuI" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen></iframe>
-    <hr />
-    <iframe width="560" height="315" src="https://www.youtube.com/embed/QqZl61bJ9BA" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen></iframe>
-</center>
+4. Verify replication by checking the second database:
 
-## What is the difference from others?
+```bash
+sqlite3 /tmp/harmonylite-2.db
+sqlite> SELECT * FROM Books;
+```
 
-HarmonyLite is essentially a CDC (Change Data Capture) and replication pipeline running top of NATS. It can automatically configure appropriate
-JetStreams making sure those streams evenly distribute load over those shards, so scaling simply boils down to adding more nodes, and
-re-balancing those JetStreams (auto re-balancing not implemented yet).
+You should see your changes automatically propagated across all nodes in the cluster.
 
-There are a few solutions like [rqlite](https://github.com/rqlite/rqlite), [dqlite](https://dqlite.io/), and
-[LiteFS](https://github.com/superfly/litefs) etc. All of them either are layers on top of SQLite (e.g.
-rqlite, dqlite) that requires them to sit in the middle with network layer in order to provide
-replication; or intercept physical page level writes to stream them off to replicas. In both
-cases they require a single primary node where all the writes have to go, and then these
-changes are applied to multiple readonly replicas.
+## How HarmonyLite Works
 
-HarmonyLite on the other hand is born different. It's born to act as a side-car to your existing processes:
- - Instead of requiring single primary, there is no primary! Which means any node can make changes to its local DB.
-   HarmonyLite will use triggers to capture your changes (hence atomic records), and then stream them off to NATS.
- - Instead of being strongly consistent, it's eventually consistent. Which means no locking, or blocking of nodes.
- - It does not require any changes to your application logic for reading/writing.
+HarmonyLite uses Change Data Capture (CDC) to monitor database changes via SQLite triggers. When a change occurs:
 
-Making these choices has multiple benefits:
+1. The change is captured via database triggers
+2. The change is published to NATS JetStream
+3. All nodes (including the originating node) apply the changes in a deterministic order
+4. Last-writer-wins conflict resolution ensures eventual consistency
 
-- You can read and write to your SQLite database like you normally do. No extension, or VFS changes.
-- You can write on any node! You don't have to go to single primary for writing your data.
-- As long as you start with same copy of database, all the mutations will eventually converge
-  (hence eventually consistent).
+### Comparison with Other Solutions
+
+| Feature | HarmonyLite | rqlite | dqlite | LiteFS |
+|---------|-------------|--------|--------|--------|
+| Architecture | Leaderless | Leader-follower | Leader-follower | Primary-replica |
+| Consistency | Eventual | Strong | Strong | Strong |
+| Write nodes | All nodes | Leader only | Leader only | Primary only |
+| Application changes | None | API changes | API changes | VFS layer |
+| Replication level | Logical (row) | Logical (SQL) | Physical | Physical |
+
+Unlike solutions like [rqlite](https://github.com/rqlite/rqlite), [dqlite](https://dqlite.io/), and [LiteFS](https://github.com/superfly/litefs) which use leader-follower architectures requiring all writes to go through a single primary node, HarmonyLite:
+
+- Allows writes on any node
+- Provides eventual consistency without locking
+- Requires no application code changes
+- Functions as a side-car process alongside your existing applications
 
 ## FAQ
 
-### What happens when there is a race condition?
+### How are race conditions handled?
 
-In HarmonyLite every row is uniquely mapped to a JetStream. This guarantees that for any node to publish changes for a row it
-has to go through same JetStream as everyone else. If two nodes perform a change to same row in parallel, both of the
-nodes will compete to publish their change to JetStream cluster. Due to
-[RAFT quorum](https://docs.nats.io/running-a-nats-service/configuration/clustering/jetstream_clustering#raft)
-constraint only one of the writer will be able to get its changes published first. Now as these changes are applied
-(even the publisher applies its own changes to database) the **last writer** will always win. This means there is
-NO serializability guarantee of a transaction spanning multiple tables. This is a design choice, in order to avoid
-any sort of global locking, and performance.
+In HarmonyLite, each row is deterministically mapped to a specific JetStream. When multiple nodes attempt to change the same row simultaneously:
 
-### Won't capturing changes with triggers use more disk space?
+1. All nodes compete to publish their change to the same JetStream
+2. NATS' [RAFT consensus](https://docs.nats.io/running-a-nats-service/configuration/clustering/jetstream_clustering#raft) determines which change is accepted first
+3. Changes are applied on all nodes in the same order
+4. Last-writer-wins ensures eventual consistency
 
-Yes it will require additional storage to old/new values from triggers. But right now that is the only way
-sqlite can and should allow one to capture changes. However, in a typical setting these captured
-changes will be picked up pretty quickly, and cleaned up as soon as they have been pushed to NATS.
-Disk space is usually the cheapest part of modern cloud, so it should not be a huge problem.
+Note that there is no serializability guarantee for transactions spanning multiple tables. This design choice avoids global locking and maximizes performance.
 
-### How do I cleanup my database?
+### Does capturing changes with triggers impact storage?
 
-Ask harmonylite to remove hooks and log tables by:
-`harmonylite -config /path/to/config.toml -cleanup`
+Yes, additional storage is temporarily required to store change records. However:
 
-### How many shards should I have?
+- Change records are typically processed and cleaned up quickly
+- Modern storage is inexpensive
+- The storage overhead is minimal compared to the benefits of distributed replication
 
-Mostly you won't need more than 1. But it depends on your use-case, and what problem you are solving for. While read
-scaling won't be a problem, your write throughput will depend on your network and disk speeds (Network being
-the biggest culprit). Shards are there to alleviate the problem when you are writing fast enough to cause
-bottleneck by NATS JetStream (very unlikely with a commodity SQLite node).
+### How do I clean up HarmonyLite database artifacts?
 
-### Can I use HarmonyLite as single primary and multiple replicas?
+To remove HarmonyLite hooks and log tables:
 
-Yes you can. There are two flags in configuration that will allow you to do that. First flag `publish`
-enables/disables publishing local changes to NATS, you should disable `publish` (set it to `false`)
-on replicas. Second flag is `replicate` that enables/disables replicating changes from NATS on to
-local node. You should disable `replicate` (set it to `false`) on primary.
+```bash
+harmonylite -config /path/to/config.toml -cleanup
+```
+
+### How many shards should I configure?
+
+For most applications, a single shard is sufficient. Additional shards may be beneficial if:
+
+- You have extremely high write throughput
+- You're experiencing NATS JetStream bottlenecks
+- You need to partition data for specific scalability requirements
+
+The optimal number depends on your specific workload and infrastructure.
+
+### Can I use HarmonyLite in a primary-replica configuration?
+
+Yes. While HarmonyLite is designed for multi-directional replication, you can configure it for a primary-replica setup by adjusting two configuration flags:
+
+1. Set `publish=false` on replica nodes to prevent them from publishing changes
+2. Set `replicate=false` on the primary node to prevent it from applying changes from other nodes
+
+This configuration allows writes only on the primary while replicas remain read-only.
