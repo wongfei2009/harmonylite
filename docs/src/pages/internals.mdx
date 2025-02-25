@@ -1,5 +1,7 @@
 # HarmonyLite: How It Works
 
+import Mermaid from '../components/Mermaid';
+
 HarmonyLite is a distributed SQLite replication system with a leaderless architecture. This document explains the core components and mechanisms that make it work.
 
 ## Architecture Overview
@@ -11,7 +13,7 @@ HarmonyLite provides distributed SQLite replication through these key components
 3. **Node Coordination**: Manages replication between distributed nodes
 4. **Snapshot Management**: Handles database state synchronization for new or long-offline nodes
 
-```mermaid
+<Mermaid chart={`
 flowchart TB
     subgraph "Node 1"
         DB1[SQLite DB] --> Triggers1[SQLite Triggers]
@@ -42,7 +44,7 @@ flowchart TB
     class DB1,DB2 sqlite
     class HarmonyLite1,HarmonyLite2 harmony
     class Streams,Objects nats
-```
+`} />
 
 ## Triggers and Data Capture
 
@@ -53,7 +55,7 @@ HarmonyLite captures database changes using SQLite triggers that record modifica
 - **Column mapping**: Change log tables prefix original column names with `val_` (e.g., `id` becomes `val_id`)
 - **Automatic trigger setup**: Triggers are compiled using Go's templating system and installed at boot time
 
-```mermaid
+<Mermaid chart={`
 erDiagram
     USERS {
         int id PK
@@ -79,7 +81,7 @@ erDiagram
     
     USERS ||--o{ USERS_CHANGE_LOG : "triggers create"
     USERS_CHANGE_LOG ||--o{ GLOBAL_CHANGE_LOG : "references"
-```
+`} />
 
 ### Trigger Implementation
 
@@ -124,7 +126,7 @@ When HarmonyLite detects database changes, it follows this workflow:
 8. **Consistency**: Ordering is guaranteed by RAFT consensus at the stream level, ensuring a deterministic sequence
 9. **Last-writer-wins**: When changes conflict, the last change in the cluster-wide commit order takes precedence
 
-```mermaid
+<Mermaid chart={`
 sequenceDiagram
     participant App1 as Application (Node 1)
     participant DB1 as SQLite DB (Node 1)
@@ -152,7 +154,7 @@ sequenceDiagram
     
     App2->>DB2: Read updated data
     DB2->>App2: Return data
-```
+`} />
 
 ## Changelog Format
 
@@ -176,7 +178,7 @@ interface HarmonyLitePublishedRow {
 
 Snapshots enable nodes to recover after lengthy downtimes without replaying all historical changes.
 
-```mermaid
+<Mermaid chart={`
 graph TB
     subgraph "Snapshot Creation"
         A[Monitor Sequence Numbers] --> B{Threshold Reached?}
@@ -202,7 +204,7 @@ graph TB
         P --> Q[Process Recent Changes]
         Q --> R
     end
-```
+`} />
 
 ### Snapshot Frequency
 
@@ -245,7 +247,7 @@ HarmonyLite supports multiple snapshot storage backends:
 - **WebDAV**: For web-based storage systems
 - **SFTP**: For secure file transfers
 
-```mermaid
+<Mermaid chart={`
 flowchart LR
     HarmonyLite[HarmonyLite] --> Storage{Storage Provider}
     Storage -->|Default| NATS[NATS Object Storage]
@@ -260,7 +262,7 @@ flowchart LR
     class HarmonyLite primary
     class Storage default
     class NATS,S3,WebDAV,SFTP provider
-```
+`} />
 
 ## Configuration Example
 
@@ -296,7 +298,7 @@ stream_prefix="harmonylite-changes"
 - **Snapshot Interval**: Balance between recovery speed and storage usage
 - **Cleanup Interval**: Affects how quickly change logs are purged after replication
 
-```mermaid
+<Mermaid chart={`
 graph TD
     subgraph "HarmonyLite Performance Factors"
         A[Database Size]
@@ -320,7 +322,7 @@ graph TD
     C --> G
     D --> E
     D --> G
-```
+`} />
 
 ## Monitoring and Troubleshooting
 
@@ -347,7 +349,7 @@ Key metrics include:
 | `count_changes` | Histogram | Latency for counting changes in microseconds |
 | `scan_changes` | Histogram | Latency for scanning change rows in microseconds |
 
-```mermaid
+<Mermaid chart={`
 graph LR
     A[HarmonyLite Nodes] -->|expose| B[Prometheus Metrics]
     B -->|scrape| C[Prometheus Server]
@@ -361,7 +363,7 @@ graph LR
     class A component
     class B,C,D monitoring
     class E visualization
-```
+`} />
 
 ### Logging
 
@@ -458,7 +460,7 @@ Since HarmonyLite relies on NATS, monitoring the NATS infrastructure is crucial:
 2. **Stream Information**: Check `http://<nats-server>:8222/jsz` for JetStream details
 3. **Consumer Status**: Review message delivery with `http://<nats-server>:8222/consz`
 
-```mermaid
+<Mermaid chart={`
 gantt
     title HarmonyLite Troubleshooting Workflow
     dateFormat  YYYY-MM-DD
@@ -474,7 +476,7 @@ gantt
     Adjust Configuration               :c1, after b3, 2d
     Restart Problematic Nodes          :c2, after c1, 1d
     Force Snapshot If Needed           :c3, after c2, 1d
-```
+`} />
 
 ## Advanced Topics
 
@@ -482,7 +484,7 @@ gantt
 - **Disaster Recovery**: Strategies for handling catastrophic failures
 - **Scaling**: Adding nodes to a running cluster
 
-```mermaid
+<Mermaid chart={`
 flowchart TB
     subgraph "HarmonyLite Deployment Options"
         direction LR
@@ -515,4 +517,4 @@ flowchart TB
     class B1 writer
     class B2,B3,B4 reader
     class C1,C2,C3 region
-```
+`} />
