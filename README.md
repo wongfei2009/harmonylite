@@ -22,7 +22,7 @@ HarmonyLite continues and extends the vision of Marmot by providing:
 
 ## Quick Start
 
-Download the [latest release](https://github.com/YOUR_USERNAME/harmonylite/releases/latest) and extract:
+Download the [latest release](https://github.com/wongfei2009/harmonylite/releases/latest) and extract:
 
 ```bash
 tar vxzf harmonylite-v*.tar.gz
