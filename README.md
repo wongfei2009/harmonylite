@@ -38,6 +38,7 @@ Make changes to one database and watch them propagate:
 ```bash
 # Insert data in the first database
 sqlite3 /tmp/harmonylite-1.db
+> PRAGMA trusted_schema = ON;
 > INSERT INTO Books (title, author, publication_year) VALUES ('Project Hail Mary', 'Andy Weir', 2021);
 
 # See it appear in the second database
