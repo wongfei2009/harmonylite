@@ -10,6 +10,10 @@ const nextConfig = {
 const withNextra = require("nextra")({
   theme: "nextra-theme-docs",
   themeConfig: "./theme.config.js",
-  // unstable_staticImage: true,
+  mdxOptions: {
+    rehypePlugins: [
+      require('rehype-mermaid')
+    ]
+  }
 });
 module.exports = withNextra(nextConfig);

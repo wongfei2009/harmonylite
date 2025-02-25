@@ -10,12 +10,15 @@
     "dev": "next"
   },
   "dependencies": {
+    "mermaid": "^11.4.1",
     "next": "^12.3.1",
+    "next-mdx-remote": "^5.0.0",
     "nextra": "^2.0.0-beta.41",
     "nextra-theme-docs": "^2.0.0-beta.41",
     "octokit": "^2.0.10",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "rehype-mermaid": "^3.0.0"
   },
   "devDependencies": {
     "@next/eslint-plugin-next": "^12.3.1",
