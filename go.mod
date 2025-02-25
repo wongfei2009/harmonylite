@@ -1,4 +1,4 @@
-module github.com/maxpert/marmot
+module github.com/wongfei2009/marmot
 
 go 1.22.0
 
