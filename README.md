@@ -105,7 +105,7 @@ See `config.toml` for detailed configuration options.
 ### Building from Source
 
 ```bash
-export CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness"
+export CGO_ENABLED=1 CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness"
 go build
 ```
 
