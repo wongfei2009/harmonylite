@@ -1,15 +1,19 @@
 # How It Works
 
-HarmonyLite is a distributed SQLite replication system with a leaderless architecture. This document explains the core components and mechanisms that make it work.
+HarmonyLite is a distributed SQLite replication system designed to provide leaderless, eventually consistent replication across multiple nodes. It enhances SQLite by enabling seamless data synchronization without a central point of control, making it ideal for distributed applications. This document explains the core components, mechanisms, and design choices that power HarmonyLite.
+
+---
 
 ## Architecture Overview
 
-HarmonyLite provides distributed SQLite replication through these key components:
+HarmonyLite orchestrates distributed SQLite replication through four key components:
 
-1. **Change Data Capture (CDC)**: Uses SQLite triggers to track all database modifications
-2. **NATS JetStream**: Reliable message transport with built-in consensus
-3. **Node Coordination**: Manages replication between distributed nodes
-4. **Snapshot Management**: Handles database state synchronization for new or long-offline nodes
+1. **Change Data Capture (CDC)**: SQLite triggers monitor all database changes.
+2. **NATS JetStream**: Provides reliable messaging and consensus for replication.
+3. **Node Coordination**: Manages replication across distributed nodes.
+4. **Snapshot Management**: Synchronizes database states for new or offline nodes.
+
+The following Mermaid diagram illustrates this architecture:
 
 ```mermaid
 flowchart TB
@@ -44,14 +48,20 @@ flowchart TB
     class Streams,Objects nats
 ```
 
+**Explanation**: Each node runs a SQLite database with triggers that capture changes into local change logs. The HarmonyLite process on each node communicates these changes via NATS JetStream streams, while snapshots are stored in an object store for recovery. This setup ensures all nodes remain synchronized without a leader.
+
+---
+
 ## Triggers and Data Capture
 
-HarmonyLite captures database changes using SQLite triggers that record modifications to dedicated tracking tables:
+HarmonyLite uses SQLite triggers to capture database modifications efficiently:
 
-- **Global change log table**: `__harmonylite___global_change_log` maintains the sequence of all operations committed to the database
-- **Per-table change logs**: Each monitored table gets a dedicated `__harmonylite__<table_name>_change_log` table that records changed values
-- **Column mapping**: Change log tables prefix original column names with `val_` (e.g., `id` becomes `val_id`)
-- **Automatic trigger setup**: Triggers are compiled using Go's templating system and installed at boot time
+- **Global Change Log Table**: `__harmonylite___global_change_log` tracks the sequence of all database operations.
+- **Per-Table Change Logs**: Each monitored table has a dedicated `__harmonylite__<table_name>_change_log` table storing changed values.
+- **Column Mapping**: Original column names are prefixed with `val_` (e.g., `id` becomes `val_id`) in change logs.
+- **Automatic Setup**: Triggers are generated using Go templates and installed when HarmonyLite starts.
+
+The relationship between these elements is depicted below:
 
 ```mermaid
 erDiagram
@@ -81,12 +91,18 @@ erDiagram
     USERS_CHANGE_LOG ||--o{ GLOBAL_CHANGE_LOG : "references"
 ```
 
+### Why Triggers?
+
+HarmonyLite opts for SQLite triggers over alternatives like parsing the Write-Ahead Log (WAL) because triggers:
+- Offer row-level precision and reliability.
+- Automatically fire on `INSERT`, `UPDATE`, and `DELETE` operations.
+- Require no additional parsing logic or manual intervention.
+
 ### Trigger Implementation
 
-HarmonyLite creates three triggers for each table (`INSERT`, `UPDATE`, `DELETE`), each firing `AFTER` the change is committed:
+For each table, HarmonyLite creates three triggers (`INSERT`, `UPDATE`, `DELETE`) that execute after changes are committed. Here’s a simplified `INSERT` trigger example:
 
 ```sql
--- Simplified example of an INSERT trigger
 CREATE TRIGGER __harmonylite__users_change_log_on_insert
 AFTER INSERT ON users
 BEGIN
@@ -96,7 +112,7 @@ BEGIN
     ) VALUES(
         NEW.id, NEW.name, NEW.email,
         'insert',
-        CAST((strftime('%s','now') || substr(strftime('%f','now'),4)) as INT),
+        CAST((strftime('%s','now') || substr(strftime('%f','now'),4)) AS INT),
         0 -- Pending state
     );
 
@@ -108,21 +124,27 @@ BEGIN
 END;
 ```
 
-For `DELETE` operations, the trigger captures the `OLD` values, while `INSERT` and `UPDATE` capture the `NEW` values.
+- **INSERT/UPDATE**: Capture `NEW` values.
+- **DELETE**: Capture `OLD` values.
+- **State**: `0` indicates "Pending" (awaiting replication).
+
+---
 
 ## Replication Process
 
-When HarmonyLite detects database changes, it follows this workflow:
+HarmonyLite’s replication workflow ensures changes propagate across nodes consistently:
 
-1. **Change Detection**: Monitors the SQLite database and Write-Ahead Log (WAL) files for modifications
-2. **Change Collection**: Gathers pending change records from the tracking tables
-3. **Hash Calculation**: For each record, calculates a consistent hash based on table name and primary keys
-4. **Stream Selection**: Routes each change to the appropriate JetStream based on its hash
-5. **Publishing**: Sends the change to the designated JetStream subject
-6. **Confirmation**: Marks the change as published once JetStream acknowledges receipt
-7. **Replay**: On receiving nodes, changes are applied by replaying the records to local tables
-8. **Consistency**: Ordering is guaranteed by RAFT consensus at the stream level, ensuring a deterministic sequence
-9. **Last-writer-wins**: When changes conflict, the last change in the cluster-wide commit order takes precedence
+1. **Change Detection**: Monitors SQLite DB and WAL files for updates.
+2. **Change Collection**: Retrieves pending records from change log tables.
+3. **Hash Calculation**: Computes a hash from table name and primary keys.
+4. **Stream Selection**: Routes changes to a JetStream stream based on the hash.
+5. **Publishing**: Sends changes to NATS JetStream.
+6. **Confirmation**: Marks changes as published after JetStream acknowledgment.
+7. **Replay**: Applies changes to local tables on receiving nodes.
+8. **Consistency**: Ensures order via RAFT consensus in JetStream.
+9. **Conflict Resolution**: Uses a "last-writer-wins" strategy for conflicts.
+
+This process is visualized in the following sequence diagram:
 
 ```mermaid
 sequenceDiagram
@@ -136,125 +158,118 @@ sequenceDiagram
     
     App1->>DB1: INSERT/UPDATE/DELETE
     DB1->>DB1: Trigger executes
-    DB1->>DB1: Record in change log table
+    DB1->>DB1: Record in change log
     
     HL1->>DB1: Poll for changes
     DB1->>HL1: Return pending changes
     HL1->>HL1: Calculate hash
-    HL1->>NATS: Publish change to stream
+    HL1->>NATS: Publish to stream
     NATS->>HL1: Acknowledge receipt
-    HL1->>DB1: Mark change as published
+    HL1->>DB1: Mark as published
     
-    NATS->>HL2: Deliver change record
-    HL2->>HL2: Process change record
-    HL2->>DB2: Apply change (INSERT/UPDATE/DELETE)
+    NATS->>HL2: Deliver change
+    HL2->>HL2: Process change
+    HL2->>DB2: Apply change
     HL2->>NATS: Acknowledge processing
     
     App2->>DB2: Read updated data
     DB2->>App2: Return data
 ```
 
+### Why Hashing?
+
+Hashing ensures changes to the same row are routed to the same JetStream stream, enabling parallel processing and horizontal scaling while maintaining order for each row.
+
+---
+
 ## Changelog Format
 
-Changes are transmitted as CBOR-serialized payloads (optionally compressed) with this structure:
+Changes are serialized using CBOR (optionally compressed with zstd) and transmitted with this structure:
 
-```typescript
-interface HarmonyLitePublishedRow {
-  FromNodeId: number;  // Unique ID of the originating node
-  Payload: {
-    Id: number;        // Change log entry ID
-    Type: "insert" | "update" | "delete";  // Operation type
-    TableName: string; // The affected table name
-    Row: {             // Column name to value mapping
-      [ColumnName: string]: any
+```json
+{
+  "FromNodeId": 1,
+  "Payload": {
+    "Id": 123,
+    "Type": "insert",
+    "TableName": "users",
+    "Row": {
+      "id": 456,
+      "name": "John Doe",
+      "email": "john@example.com"
     }
-  };
+  }
 }
 ```
 
+This format ensures all necessary data is included for replaying changes on other nodes.
+
+---
+
 ## Snapshot Management
 
-Snapshots enable nodes to recover after lengthy downtimes without replaying all historical changes.
+Snapshots accelerate recovery for nodes joining the cluster or recovering from extended downtime.
+
+### Benefits
+
+Snapshots reduce recovery time by allowing nodes to restore from a recent state and apply only subsequent changes, rather than replaying all historical logs.
+
+### Snapshot Creation
 
 ```mermaid
 graph TB
-    subgraph "Snapshot Creation"
-        A[Monitor Sequence Numbers] --> B{Threshold Reached?}
-        B -->|Yes| C[Create Temp Directory]
-        B -->|No| A
-        C --> D["VACUUM INTO (Temporary Copy)"]
-        D --> E[Remove Triggers and Change Logs]
-        E --> F[Optimize with VACUUM]
-        F --> G[Upload Snapshot]
-        G --> H[Update Sequence Map]
-        H --> A
-    end
+    A[Monitor Sequence Numbers] --> B{Threshold Reached?}
+    B -->|Yes| C[Create Temp Directory]
+    B -->|No| A
+    C --> D["VACUUM INTO (Temp Copy)"]
+    D --> E[Remove Triggers & Logs]
+    E --> F[Optimize with VACUUM]
+    F --> G[Upload Snapshot]
+    G --> H[Update Sequence Map]
+    H --> A
 ```
+
+### Snapshot Restoration
 
 ```mermaid
 graph TB
-    subgraph "Snapshot Restoration"
-        I[Node Startup] --> J[Check DB Integrity]
-        J --> K[Load Sequence Map]
-        K --> L{Too Far Behind?}
-        L -->|Yes| M[Download Snapshot]
-        L -->|No| R[Normal Operation]
-        M --> N[Exclusive Lock]
-        N --> O[Replace DB Files]
-        O --> P[Install Triggers]
-        P --> Q[Process Recent Changes]
-        Q --> R
-    end
+    I[Node Startup] --> J[Check DB Integrity]
+    J --> K[Load Sequence Map]
+    K --> L{Too Far Behind?}
+    L -->|Yes| M[Download Snapshot]
+    L -->|No| R[Normal Operation]
+    M --> N[Exclusive Lock]
+    N --> O[Replace DB Files]
+    O --> P[Install Triggers]
+    P --> Q[Process Recent Changes]
+    Q --> R
 ```
 
-### Snapshot Frequency
+### Frequency and Triggers
 
-HarmonyLite takes snapshots based on:
-- Sequence number thresholds
-- Configured time intervals
-- Manual triggers
+Snapshots are created based on:
+- **Sequence Thresholds**: Triggered when `max_entries ÷ shards` is reached.
+- **Time Intervals**: Configurable via the `interval` setting.
+- **Manual Commands**: Using `harmonylite -save-snapshot`.
 
-### Saving Snapshots
-
-The snapshot process works as follows:
-
-1. **Sequence Tracking**: Each node tracks the sequence numbers of change log entries it processes
-2. **Snapshot Calculation**: A node calculates when to take snapshots based on `max-log-entries ÷ shards`
-3. **Snapshot Creation**: When a threshold is reached:
-   - A temporary copy of the database is created using SQLite's `VACUUM INTO <PATH>` feature
-   - HarmonyLite removes change tracking tables and triggers from the snapshot
-   - The snapshot is optimized with another `VACUUM` operation
-4. **Storage**: The snapshot is uploaded to the configured storage system (NATS, S3, WebDAV, or SFTP)
-5. **Sequence Mapping**: The sequence position is saved to the `seq-map-path` file for future reference
-
-### Restoring Snapshots
-
-When a node starts, it follows this sequence:
-
-1. **Integrity Check**: Verifies the database file and performs WAL checkpoints
-2. **Sequence Comparison**: Compares local sequence numbers to the JetStream's current position
-3. **Download Decision**: If too far behind, downloads the most recent snapshot
-4. **Exclusive Locking**: Uses transaction locks to ensure atomic replacement
-5. **File Replacement**: Replaces the local database with the downloaded snapshot
-6. **Trigger Installation**: Re-installs change tracking tables and triggers
-7. **Catch-up**: Processes any changes that occurred since the snapshot was taken
+---
 
 ## Storage Options
 
 HarmonyLite supports multiple snapshot storage backends:
 
-- **NATS Object Storage**: Built-in storage using JetStream's object capabilities
-- **S3-compatible**: Amazon S3, MinIO, Backblaze B2, etc.
-- **WebDAV**: For web-based storage systems
-- **SFTP**: For secure file transfers
+- **NATS Object Storage**: Default, integrated with JetStream.
+- **S3-Compatible**: Ideal for cloud environments (e.g., AWS S3, MinIO).
+- **WebDAV**: Suits web-based storage.
+- **SFTP**: Offers secure file transfers.
 
 ```mermaid
 flowchart LR
     HarmonyLite[HarmonyLite] --> Storage{Storage Provider}
     Storage -->|Default| NATS[NATS Object Storage]
-    Storage -->|Compatible with AWS| S3[S3 / MinIO / Backblaze]
-    Storage -->|Web-based| WebDAV[WebDAV]
-    Storage -->|Secure file transfer| SFTP[SFTP]
+    Storage -->|Cloud| S3[S3 / MinIO / Backblaze]
+    Storage -->|Web| WebDAV[WebDAV]
+    Storage -->|Secure| SFTP[SFTP]
     
     classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px
     classDef primary fill:#bbdefb,stroke:#333,stroke-width:1px
@@ -265,47 +280,56 @@ flowchart LR
     class NATS,S3,WebDAV,SFTP provider
 ```
 
+**Choosing a Backend**: Use NATS for simplicity if already using JetStream, S3 for cloud deployments, and WebDAV/SFTP for on-premises flexibility.
+
+---
+
 ## Configuration Example
 
+Here’s an annotated configuration example:
+
 ```toml
-# Basic configuration
+# Database path
 db_path="/path/to/your.db"
+
+# Unique node identifier
 node_id=1
 
-# Replication configuration
 [replication_log]
-shards=4
-max_entries=1024
-replicas=3
-compress=true
+shards=4          # Number of streams for parallel processing
+max_entries=1024  # Max changes per stream
+replicas=3        # Stream replicas for fault tolerance
+compress=true     # Enable zstd compression
 
-# Snapshot configuration
 [snapshot]
 enabled=true
-store="nats"
+store="nats"      # Storage backend ("nats", "s3", "webdav", "sftp")
 interval=3600000  # Snapshot every hour (ms)
 
-# NATS configuration
 [nats]
 urls=["nats://server1:4222", "nats://server2:4222"]
 subject_prefix="harmonylite-change-log"
 stream_prefix="harmonylite-changes"
 ```
 
+---
+
 ## Performance Considerations
 
-- **Shard Count**: More shards can increase write throughput but require more resources
-- **Compression**: Useful for content-heavy databases but adds CPU overhead
-- **Snapshot Interval**: Balance between recovery speed and storage usage
-- **Cleanup Interval**: Affects how quickly change logs are purged after replication
+- **Shards**: Increase for high-write workloads to distribute load (costs more resources).
+- **Compression**: Enable for large text/binary data to save bandwidth (adds CPU overhead).
+- **Snapshot Interval**: Shorter intervals speed recovery but increase storage use.
+- **Cleanup Interval**: Frequent cleanup reduces disk usage but may increase write load.
+
+---
 
 ## Monitoring and Troubleshooting
 
-HarmonyLite provides several mechanisms to monitor system health and diagnose problems in a distributed setup.
+HarmonyLite offers robust tools for monitoring and diagnostics.
 
 ### Prometheus Metrics
 
-HarmonyLite exposes Prometheus metrics that can be scraped to monitor the system's performance and health:
+Enable metrics in the config:
 
 ```toml
 [prometheus]
@@ -315,14 +339,14 @@ namespace="harmonylite"
 subsystem="replication"
 ```
 
-Key metrics include:
+Key metrics:
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `published` | Counter | Number of change log records successfully published |
-| `pending_publish` | Gauge | Number of records waiting to be published |
-| `count_changes` | Histogram | Latency for counting changes in microseconds |
-| `scan_changes` | Histogram | Latency for scanning change rows in microseconds |
+| Metric           | Type     | Description                              |
+|------------------|----------|------------------------------------------|
+| `published`      | Counter  | Successfully published change records    |
+| `pending_publish`| Gauge    | Records awaiting publication             |
+| `count_changes`  | Histogram| Latency counting changes (µs)            |
+| `scan_changes`   | Histogram| Latency scanning change rows (µs)        |
 
 ```mermaid
 graph LR
@@ -342,101 +366,51 @@ graph LR
 
 ### Logging
 
-HarmonyLite uses structured logging via zerolog to provide detailed information about system operations:
+Configure structured logging:
 
 ```toml
 [logging]
-verbose=true   # Enable debug-level logging
-format="json"  # Options: "console" or "json"
+verbose=true
+format="json"  # Or "console"
 ```
 
-Important log patterns to monitor:
+Monitor logs for:
+- `"Unable to publish"`: Replication issues.
+- `"Snapshot saved"`: Successful snapshots.
+- `"Cleaned up DB change logs"`: Housekeeping.
 
-- Errors with `"Unable to publish"` indicate replication issues
-- `"Snapshot saved"` messages confirm successful snapshot operations
-- `"Cleaned up DB change logs"` shows housekeeping operations
+### NATS Health
 
-### Common Issues and Solutions
+Monitor NATS using endpoints like `http://<nats-server>:8222/` for server status and JetStream metrics.
+
+### Common Issues
 
 #### Replication Delays
-
-**Symptoms:**
-- Increasing `pending_publish` metric
-- Changes not propagating to other nodes
-
-**Possible Causes and Solutions:**
-1. **Network Issues**
-   - Check connectivity between nodes and NATS
-   - Verify firewall rules allow NATS traffic (typically port 4222)
-2. **NATS Stream Full**
-   - Increase `max_entries` in the configuration
-   - Add more NATS storage capacity
-3. **Node Overload**
-   - Increase `scan_max_changes` parameter
-   - Consider adding more nodes or shards
+- **Symptoms**: Rising `pending_publish`, delayed propagation.
+- **Solutions**: Check network, increase `max_entries`, or add shards.
 
 #### Snapshot Failures
+- **Symptoms**: `"Unable to save snapshot"`, missing snapshots.
+- **Solutions**: Verify storage connectivity, ensure disk space, check for DB locks.
 
-**Symptoms:**
-- Errors containing `"Unable to save snapshot"`
-- Missing snapshots in storage
-
-**Possible Causes and Solutions:**
-1. **Storage Connectivity**
-   - Verify credentials and endpoint configuration
-   - Check storage service health
-2. **Disk Space**
-   - Ensure sufficient temporary space for snapshot creation
-   - Clean up old snapshots
-3. **Database Locks**
-   - Check for long-running transactions preventing snapshots
-   - Consider adjusting application transaction patterns
-
-#### Divergent Data
-
-**Symptoms:**
-- Different query results on different nodes
-- Application inconsistency reports
-
-**Possible Causes and Solutions:**
-1. **Schema Changes**
-   - Ensure schema changes are coordinated across all nodes
-   - Restart HarmonyLite after schema changes
-2. **Trigger Failures**
-   - Check for missing triggers with `SELECT * FROM sqlite_master WHERE type='trigger'`
-   - Reinstall triggers if necessary
-3. **Sequence Mismatch**
-   - Compare sequence numbers across nodes
-   - Force a snapshot restore on divergent nodes
+#### Data Divergence
+- **Symptoms**: Inconsistent query results.
+- **Solutions**: Coordinate schema changes, reinstall triggers, restore snapshots.
 
 ### Diagnostics Commands
 
-For deeper investigation, HarmonyLite provides several command-line options:
-
 ```bash
-# Check trigger installation without starting replication
-harmonylite -config config.toml -verify-only
-
-# Clean up replication artifacts (use with caution)
-harmonylite -config config.toml -cleanup
-
-# Force snapshot creation
+# Force snapshot
 harmonylite -config config.toml -save-snapshot
 
-# Enable profiling for performance analysis
-harmonylite -config config.toml -pprof ":6060"
+# Clean artifacts
+harmonylite -config config.toml -cleanup
 ```
 
-### NATS Monitoring
-
-Since HarmonyLite relies on NATS, monitoring the NATS infrastructure is crucial:
-
-1. **NATS Server Monitoring Endpoint**: Available at `http://<nats-server>:8222/`
-2. **Stream Information**: Check `http://<nats-server>:8222/jsz` for JetStream details
-3. **Consumer Status**: Review message delivery with `http://<nats-server>:8222/consz`
+---
 
 ## Advanced Topics
 
-- **Multiple Replica Types**: Configure read-only or write-only nodes
-- **Disaster Recovery**: Strategies for handling catastrophic failures
-- **Scaling**: Adding nodes to a running cluster
+- **Replica Types**: Configure read-only (`publish=false`) or write-only (`replicate=false`) nodes.
+- **Disaster Recovery**: Use snapshots and logs for recovery (future docs planned).
+- **Scaling**: Add nodes by updating `urls` and restarting (future docs planned).
