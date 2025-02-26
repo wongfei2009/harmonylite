@@ -1,8 +1,8 @@
 module github.com/wongfei2009/harmonylite
 
-go 1.23.0
+go 1.22.0
 
-toolchain go1.24.0
+toolchain go1.22.0
 
 require (
 	github.com/BurntSushi/toml v1.4.0
