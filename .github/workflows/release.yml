@@ -3,24 +3,6 @@ name: Release
 on:
   release:
     types: [created]
-  
-  push:
-    branches: [master]
-    paths-ignore:
-      - 'docs/**'           # Ignore documentation changes
-      - '**.md'             # Ignore markdown files
-      - '.github/workflows/pages.yml'  # Ignore docs workflow file
-  
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-    paths-ignore:
-      - 'docs/**'           # Ignore documentation changes
-      - '**.md'             # Ignore markdown files
-      - '.github/workflows/pages.yml'  # Ignore docs workflow file
-
   workflow_dispatch:        # Allow manual triggering
 
 jobs:

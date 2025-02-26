@@ -6,7 +6,6 @@ on:
     paths:
       - 'docs/**'                            # Only run when files in the docs directory change
       - '.github/workflows/pages.yml'        # Or when this workflow file itself changes
-  
   workflow_dispatch:  # Keep manual trigger option
 
 permissions:
