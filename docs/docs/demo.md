@@ -1,99 +1,127 @@
----
-id: demo
-title: Demo
-slug: /demo
----
-
 # Demo
 
-This page demonstrates HarmonyLite in action with a practical example of distributed SQLite replication.
+This guide walks you through deploying a simple note-taking application using **Pocketbase** as the backend and **HarmonyLite** for distributed SQLite replication. By combining these tools, you’ll build a fault-tolerant, scalable system where notes sync across multiple nodes—perfect for small to medium-scale applications requiring high availability.
 
-## Demo Overview
+Let’s get started!
 
-In this demo, we'll show how HarmonyLite enables:
+---
 
-1. Multi-node SQLite replication with no primary server
-2. Automatic synchronization between database instances
-3. Handling of concurrent writes from different locations
+## Introduction
 
-## Setting Up the Demo Environment
+**Pocketbase** is an open-source backend-in-one solution featuring an embedded SQLite database, real-time subscriptions, authentication, file storage, and a built-in admin dashboard—all packaged in a single executable. **HarmonyLite** complements it by enabling distributed replication of SQLite databases across multiple nodes using a NATS-based cluster and a "last-writer-wins" conflict resolution strategy.
 
-Let's create a simple three-node HarmonyLite cluster locally to see how changes propagate:
+In this demo, we’ll:
+- Set up a three-node HarmonyLite cluster to replicate the database.
+- Configure Pocketbase instances to use these replicated databases, each running on a unique port.
+- Use Pocketbase’s admin dashboard as the app and test replication and fault tolerance.
 
-```bash
-# Create the demo databases with sample book data
-./harmonylite -config examples/node-1-config.toml -cluster-addr localhost:4221 &
-./harmonylite -config examples/node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/' &
-./harmonylite -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
-```
+The outcome is a practical, distributed note-taking app ready for real-world use!
 
-After starting the cluster, we'll have three SQLite databases:
-- `/tmp/harmonylite-1.db`
-- `/tmp/harmonylite-2.db`
-- `/tmp/harmonylite-3.db`
+---
 
-## Testing Replication
+## Prerequisites
 
-Now let's see replication in action by making changes to one node and observing them propagate to others:
+Before starting, ensure you have:
+- **HarmonyLite**: Installed and available (download or build from source per its documentation).
+- **Pocketbase**: Downloaded from [Pocketbase.io](https://pocketbase.io/docs/) for your operating system.
+- A terminal and basic command-line knowledge.
 
-```bash
-# Insert a new book on node 1
-sqlite3 /tmp/harmonylite-1.db
-> INSERT INTO Books (title, author, publication_year) VALUES ('Dune', 'Frank Herbert', 1965);
-```
+---
 
-Within seconds, you can verify the change has propagated to the other nodes:
+## Step-by-Step Deployment Guide
 
-```bash
-# Check node 2
-sqlite3 /tmp/harmonylite-2.db "SELECT * FROM Books WHERE title='Dune';"
+### Step 1: Set Up HarmonyLite Cluster
 
-# Check node 3
-sqlite3 /tmp/harmonylite-3.db "SELECT * FROM Books WHERE title='Dune';"
-```
+HarmonyLite will handle SQLite replication across three nodes. Each node requires a unique configuration and database file.
 
-## Concurrent Write Handling
+1. **Create Configuration Files**  
+   For each node, create a `.toml` configuration file (e.g., `node-1-config.toml`, `node-2-config.toml`, `node-3-config.toml`). Here’s an example:
+   ```toml
+   # node-1-config.toml
+   database_path = "/tmp/harmonylite-1.db"
+   ```
+   Update `database_path` for nodes 2 and 3 (e.g., `/tmp/harmonylite-2.db`, `/tmp/harmonylite-3.db`).
 
-HarmonyLite uses a "last-writer-wins" strategy to handle concurrent writes. Let's demonstrate this:
+2. **Start the Nodes**  
+   Launch each node in a separate terminal window:
+   ```bash
+   # Node 1
+   ./harmonylite -config node-1-config.toml -cluster-addr localhost:4221 &
 
-```bash
-# First, get a book ID to update
-BOOK_ID=$(sqlite3 /tmp/harmonylite-1.db "SELECT id FROM Books LIMIT 1;")
+   # Node 2 (connects to Node 1)
+   ./harmonylite -config node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/' &
 
-# Update the same book on different nodes nearly simultaneously
-sqlite3 /tmp/harmonylite-1.db "UPDATE Books SET title='Updated on Node 1' WHERE id=$BOOK_ID;"
+   # Node 3 (connects to Nodes 1 and 2)
+   ./harmonylite -config node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
+   ```
+   - `-cluster-addr`: Unique address for each node.
+   - `-cluster-peers`: List of peer nodes for replication.
 
-# Quickly run this on another terminal
-sqlite3 /tmp/harmonylite-2.db "UPDATE Books SET title='Updated on Node 2' WHERE id=$BOOK_ID;"
-```
+3. **Verify Cluster**  
+   Confirm all nodes are running and communicating by checking their logs for errors.
 
-After a moment, check all three nodes:
+---
 
-```bash
-sqlite3 /tmp/harmonylite-1.db "SELECT title FROM Books WHERE id=$BOOK_ID;"
-sqlite3 /tmp/harmonylite-2.db "SELECT title FROM Books WHERE id=$BOOK_ID;"
-sqlite3 /tmp/harmonylite-3.db "SELECT title FROM Books WHERE id=$BOOK_ID;"
-```
+### Step 2: Configure Pocketbase
 
-All three should display the same title, which will be the "last-writer" based on JetStream's RAFT consensus.
+Each Pocketbase instance will connect to a HarmonyLite-managed database and run on a unique port to avoid conflicts.
 
-## Snapshots and Recovery
+1. **Start Pocketbase Instances with Unique Ports**  
+   Run Pocketbase for each node, specifying the database directory and HTTP port:
+   ```bash
+   # Node 1: Listen on port 8090
+   ./pocketbase serve --dir=/tmp/harmonylite-1.db --http=localhost:8090
 
-HarmonyLite can also take snapshots to support faster node recovery. Let's demonstrate:
+   # Node 2: Listen on port 8091
+   ./pocketbase serve --dir=/tmp/harmonylite-2.db --http=localhost:8091
 
-```bash
-# Stop node 3
-kill %3
+   # Node 3: Listen on port 8092
+   ./pocketbase serve --dir=/tmp/harmonylite-3.db --http=localhost:8092
+   ```
+   - **`--dir`**: Points to the SQLite database file (e.g., `/tmp/harmonylite-1.db`).
+   - **`--http`**: Defines the address and port (e.g., `localhost:8090`).
 
-# Take a snapshot with node 1
-./harmonylite -config examples/node-1-config.toml -save-snapshot
+2. **Access Admin Dashboards**  
+   Open each instance’s admin dashboard in a browser:
+   - Node 1: `http://localhost:8090/_/`
+   - Node 2: `http://localhost:8091/_/`
+   - Node 3: `http://localhost:8092/_/`
 
-# Make a change that node 3 will miss while offline
-sqlite3 /tmp/harmonylite-1.db "INSERT INTO Books (title, author, publication_year) VALUES ('New book while offline', 'Some Author', 2023);"
+3. **Create a Notes Collection**  
+   Using any node’s dashboard (e.g., Node 1 at `http://localhost:8090/_/`):
+   - Create a new collection called `notes`.
+   - Add fields:
+     - `title` (Text)
+     - `content` (Text)
+   - Save the collection.
 
-# Restart node 3 - it will automatically recover from snapshot and then catch up with missed changes
-./harmonylite -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
+---
 
-# Verify node 3 has the latest data
-sqlite3 /tmp/harmonylite-3.db "SELECT title FROM Books WHERE title='New book while offline';"
-```
+### Step 3: Test Deployment and Replication
+
+1. **Add a Note**  
+   In one dashboard (e.g., `http://localhost:8090/_/`), go to the `notes` collection and create a note (e.g., "Test Note" with "Hello, world!").
+
+2. **Verify Replication**  
+   Visit the other nodes’ dashboards (e.g., `http://localhost:8091/_/` and `http://localhost:8092/_/`) to ensure the note appears on each.
+
+3. **Simulate Failure**  
+   - Stop one node (e.g., terminate Node 2’s process).
+   - Add a new note on a running node (e.g., Node 1).
+   - Restart the stopped node and confirm it syncs the new note.
+
+This tests fault tolerance and data consistency across the cluster!
+
+---
+
+## Benefits of This Setup
+
+- **High Availability**: If one node goes down, others keep the app operational.
+- **Scalability**: Easily add more nodes to handle increased load.
+- **Ease of Use**: Pocketbase’s dashboard simplifies management, while HarmonyLite automates replication.
+
+---
+
+## Conclusion
+
+You’ve successfully deployed a distributed note-taking app with Pocketbase and HarmonyLite! This setup provides a solid foundation for real-world applications, combining a lightweight backend with robust replication. Feel free to enhance it with features like real-time updates or user authentication.
