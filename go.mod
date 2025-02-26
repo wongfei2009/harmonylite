@@ -1,6 +1,6 @@
 module github.com/wongfei2009/harmonylite
 
-go 1.22.0
+go 1.24.0
 
 require (
 	github.com/BurntSushi/toml v1.4.0
@@ -13,7 +13,7 @@ require (
 	github.com/klauspost/compress v1.18.0
 	github.com/mattn/go-sqlite3 v1.14.24
 	github.com/minio/minio-go/v7 v7.0.87
-	github.com/nats-io/nats-server/v2 v2.10.25
+	github.com/nats-io/nats-server/v2 v2.10.26
 	github.com/nats-io/nats.go v1.39.1
 	github.com/onsi/ginkgo/v2 v2.22.2
 	github.com/onsi/gomega v1.36.2
@@ -22,7 +22,7 @@ require (
 	github.com/rs/zerolog v1.33.0
 	github.com/samber/lo v1.49.1
 	github.com/studio-b12/gowebdav v0.10.0
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.35.0
 )
 
 require (

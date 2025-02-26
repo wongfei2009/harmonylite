@@ -99,7 +99,7 @@ See `config.toml` for detailed configuration options.
 
 ### Prerequisites
 
-- Go 1.22 or later
+- Go 1.24 or later
 - SQLite development libraries
 
 ### Building from Source
@@ -110,6 +110,13 @@ go build
 ```
 
 ### Running Tests
+
+First, install the Ginkgo test framework:
+```bash
+go install github.com/onsi/ginkgo/v2/ginkgo@latest
+```
+
+Then run the tests:
 
 ```bash
 ginkgo tests/e2e
