@@ -39,6 +39,11 @@ const config: Config = {
   ],
 
   themeConfig: {
+    colorMode: {
+      defaultMode: 'light', // Set the default and only mode to 'light'
+      disableSwitch: true,  // Disable the theme toggle switch
+      respectPrefersColorScheme: false, // Ignore user's system preferences
+    },
     navbar: {
       title: 'HarmonyLite',
       logo: {
@@ -60,15 +65,15 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
+      style: 'dark', // This can remain 'dark' for contrast, or change to 'light'
       copyright: `Copyright © ${new Date().getFullYear()} HarmonyLite.`,
     },
     prism: {
-      theme: themes.github,
-      darkTheme: themes.dracula,
+      theme: themes.github, // Use only the light theme
+      // Remove darkTheme to ensure no dark mode fallback
     },
     mermaid: {
-      theme: { light: 'neutral', dark: 'forest' },
+      theme: { light: 'neutral' }, // Specify only the light theme
     },
   },
 };
