@@ -89,7 +89,7 @@ HarmonyLite will handle SQLite replication across three nodes. Each node require
 
 ### Step 3: Test Deployment and Replication
 
-1. **Add a Note**  
+1. **Add a User**  
    In one dashboard (e.g., `http://localhost:8090/_/`), register a super user.
 
 2. **Verify Replication**  
