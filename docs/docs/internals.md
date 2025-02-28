@@ -100,7 +100,7 @@ HarmonyLite opts for SQLite triggers over alternatives like parsing the Write-Ah
 
 ### Trigger Implementation
 
-For each table, HarmonyLite creates three triggers (`INSERT`, `UPDATE`, `DELETE`) that execute after changes are committed. Here’s a simplified `INSERT` trigger example:
+For each table, HarmonyLite creates three triggers (`INSERT`, `UPDATE`, `DELETE`) that execute after changes are committed. Here's a simplified `INSERT` trigger example:
 
 ```sql
 CREATE TRIGGER __harmonylite__users_change_log_on_insert
@@ -132,7 +132,7 @@ END;
 
 ## Replication Process
 
-HarmonyLite’s replication workflow ensures changes propagate across nodes consistently:
+HarmonyLite's replication workflow ensures changes propagate across nodes consistently:
 
 1. **Change Detection**: Monitors SQLite DB and WAL files for updates.
 2. **Change Collection**: Retrieves pending records from change log tables.
@@ -214,6 +214,25 @@ Snapshots accelerate recovery for nodes joining the cluster or recovering from e
 
 Snapshots reduce recovery time by allowing nodes to restore from a recent state and apply only subsequent changes, rather than replaying all historical logs.
 
+### Sequence Map
+
+The Sequence Map is a critical component that tracks processed message sequences across JetStream shards:
+
+- **Purpose**: Records the last processed message sequence for each stream, acting as a database checkpoint.
+- **Implementation**: Stored as a key-value map (stream name → sequence number) serialized with CBOR.
+- **Configuration**: Path specified via `seq_map_path` in the config file.
+- **Recovery**: If missing, a node must restore from snapshots and replay all logs.
+
+```mermaid
+graph LR
+    SM[Sequence Map<br>seq-map.cbor] -->|Tracks| SS[Streams State]
+    SS -->|Determines| NG{Need Snapshot?}
+    NG -->|Yes| RS[Restore Snapshot]
+    NG -->|No| CP[Continue Processing]
+    SM -->|Enables| WR[Warm Restarts]
+    WR -->|Skip| AP[Already Processed<br>Messages]
+```
+
 ### Snapshot Creation
 
 ```mermaid
@@ -228,6 +247,8 @@ graph TB
     G --> H[Update Sequence Map]
     H --> A
 ```
+
+When a node's sequence number reaches the threshold `max_entries ÷ shards` for a specific shard, a snapshot is initiated. The Sequence Map helps track when snapshots should be created and ensures no messages are processed twice after restoration.
 
 ### Snapshot Restoration
 
@@ -244,6 +265,12 @@ graph TB
     P --> Q[Process Recent Changes]
     Q --> R
 ```
+
+During restoration, HarmonyLite:
+1. Uses the Sequence Map to determine if it needs to restore from a snapshot
+2. Compares local sequence numbers against what's available in streams
+3. Downloads and applies the snapshot if needed
+4. Resumes processing from the last sequence number saved in the Sequence Map
 
 ### Frequency and Triggers
 
@@ -286,7 +313,7 @@ flowchart LR
 
 ## Configuration Example
 
-Here’s an annotated configuration example:
+Here's an annotated configuration example:
 
 ```toml
 # Database path
@@ -294,6 +321,10 @@ db_path="/path/to/your.db"
 
 # Unique node identifier
 node_id=1
+
+# Path to persist sequence map for tracking processed messages
+# Critical for warm restarts and efficient recovery
+seq_map_path="/path/to/seq-map.cbor"
 
 [replication_log]
 shards=4          # Number of streams for parallel processing
@@ -320,6 +351,7 @@ stream_prefix="harmonylite-changes"
 - **Compression**: Enable for large text/binary data to save bandwidth (adds CPU overhead).
 - **Snapshot Interval**: Shorter intervals speed recovery but increase storage use.
 - **Cleanup Interval**: Frequent cleanup reduces disk usage but may increase write load.
+- **Sequence Map**: Regularly updating prevents message reprocessing, but adds I/O overhead.
 
 ---
 
@@ -378,6 +410,7 @@ Monitor logs for:
 - `"Unable to publish"`: Replication issues.
 - `"Snapshot saved"`: Successful snapshots.
 - `"Cleaned up DB change logs"`: Housekeeping.
+- `"Waiting checkpoint..."`: Sequence map updates.
 
 ### NATS Health
 
@@ -396,6 +429,10 @@ Monitor NATS using endpoints like `http://<nats-server>:8222/` for server status
 #### Data Divergence
 - **Symptoms**: Inconsistent query results.
 - **Solutions**: Coordinate schema changes, reinstall triggers, restore snapshots.
+
+#### Sequence Map Corruption
+- **Symptoms**: Message reprocessing, excessive snapshot restores.
+- **Solutions**: Check disk I/O, restore from backup, increase CBOR write durability.
 
 ### Diagnostics Commands
 
