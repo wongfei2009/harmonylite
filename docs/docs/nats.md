@@ -1,4 +1,4 @@
-# NATS in HarmonyLite
+# NATS
 
 ## What is NATS?
 
