@@ -71,7 +71,7 @@ HarmonyLite will handle SQLite replication across three nodes. Each node require
    Launch each node in a separate terminal window:
    ```bash
    # Node 1
-   ./harmonylite -config node-1-config.toml -cluster-addr localhost:4221 &
+   ./harmonylite -config node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/' &
 
    # Node 2 (connects to Node 1)
    ./harmonylite -config node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/' &
