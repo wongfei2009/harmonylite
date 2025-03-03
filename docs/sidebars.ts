@@ -5,7 +5,8 @@ const sidebars: SidebarsConfig = {
     'overview',
     'demo',
     'internals',
-    'nats'
+    'nats',
+    'deployment',
   ],
 };
 
