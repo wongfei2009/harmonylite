@@ -7,6 +7,7 @@ const sidebars: SidebarsConfig = {
     'internals',
     'nats',
     'deployment',
+    'production',
   ],
 };
 

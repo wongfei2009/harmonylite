@@ -134,11 +134,3 @@ harmonylite -config config.toml -save-snapshot
 # Clean artifacts
 harmonylite -config config.toml -cleanup
 ```
-
----
-
-## Advanced Topics
-
-- **Replica Types**: Configure read-only (`publish=false`) or write-only (`replicate=false`) nodes.
-- **Disaster Recovery**: Use snapshots and logs for recovery (future docs planned).
-- **Scaling**: Add nodes by updating `urls` and restarting (future docs planned).
