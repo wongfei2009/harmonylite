@@ -109,7 +109,7 @@ func cleanup() {
 		filepath.Join(dbDir, "harmonylite-1*"),
 		filepath.Join(dbDir, "harmonylite-2*"),
 		filepath.Join(dbDir, "harmonylite-3*"),
-		filepath.Join(dbDir, "nats"), // Remove the nats directory as well
+		filepath.Join(dbDir, "nats*"), // Remove the nats directory as well
 	}
 	for _, pattern := range patterns {
 		files, err := filepath.Glob(pattern)

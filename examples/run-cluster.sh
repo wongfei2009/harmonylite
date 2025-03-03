@@ -30,19 +30,31 @@ create_db /tmp/harmonylite-3.db
 
 cleanup() {
     kill "$job1" "$job2" "$job3"
+    cd "$ORIGINAL_DIR"  # Return to original directory on exit
 }
 
+# Save the current directory
+ORIGINAL_DIR=$(pwd)
+
+# Change to the directory where harmonylite binary is located
+cd "$(dirname "$0")/.."
+HARMONY_DIR=$(pwd)
+echo "Changed to harmonylite directory: $HARMONY_DIR"
+
 trap cleanup EXIT
-rm -rf /tmp/nats
-../harmonylite -config node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/,nats://localhost:4223/' &
+rm -rf /tmp/nats*
+./harmonylite -config examples/node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/,nats://localhost:4223/' &
 job1=$!
 
 sleep 1
-../harmonylite -config node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/,nats://localhost:4223/' &
+./harmonylite -config examples/node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/,nats://localhost:4223/' &
 job2=$!
 
 sleep 1
-../harmonylite -config node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
+./harmonylite -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
 job3=$!
 
 wait $job1 $job2 $job3
+
+# Return to original directory (this will also happen via cleanup if exiting early)
+cd "$ORIGINAL_DIR"

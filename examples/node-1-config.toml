@@ -12,6 +12,7 @@ compress=true
 user_name = "harmonylite"
 user_password = "secure-password-here"
 reconnect_wait_seconds=5
+server_config = "examples/nats-server-1.conf"
 
 [logging]
 verbose = false
