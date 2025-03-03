@@ -9,6 +9,10 @@ replicas=1
 compress=true
 
 [nats]
-reconnect_wait_seconds=5
 user_name = "harmonylite"
 user_password = "secure-password-here"
+reconnect_wait_seconds=5
+
+[logging]
+verbose = false
+format = "console"

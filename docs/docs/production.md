@@ -473,7 +473,7 @@ journalctl -u harmonylite -f
 
 Check NATS connectivity:
 ```bash
-nats-top -s nats://localhost:4222
+nats-top -s localhost -m 8222
 ```
 
 ### Recovery from Data Corruption
