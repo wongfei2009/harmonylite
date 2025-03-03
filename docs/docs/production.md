@@ -76,23 +76,58 @@ For applications hosted in a single region, we recommend a minimum of three node
 For globally distributed applications, deploy nodes in each region with cross-region NATS connectivity:
 
 ```
-  Region A                         Region B
+Region A                         Region B
 ┌────────────┐                   ┌────────────┐
 │            │                   │            │
 │ ┌────────┐ │                   │ ┌────────┐ │
-│ │ Node 1 │◄│───────────────────│►│ Node 4 │ │
-│ └────┬───┘ │                   │ └────┬───┘ │
-│      │     │                   │      │     │
-│ ┌────▼───┐ │                   │ ┌────▼───┐ │
-│ │ Node 2 │◄│───────────────────│►│ Node 5 │ │
-│ └────┬───┘ │                   │ └────┬───┘ │
-│      │     │                   │      │     │
-│ ┌────▼───┐ │                   │ ┌────▼───┐ │
-│ │ Node 3 │◄│───────────────────│►│ Node 6 │ │
+│ │ Node 1 │◄│═══════════════════│►│ Node 4 │ │
+│ └────┬───┘ │   Leaf Node       │ └────┬───┘ │
+│      │     │   Connection      │      │     │
+│      ▼     │                   │      ▼     │
+│ ┌────────┐ │                   │ ┌────────┐ │
+│ │ Node 2 │◄┼───┐               │ │ Node 5 │◄┼───┐
+│ └────────┘ │   │               │ └────────┘ │   │
+│            │   │ NATS Cluster  │            │   │ NATS Cluster
+│            │   │ Connections   │            │   │ Connections
+│ ┌────────┐ │   │               │ ┌────────┐ │   │
+│ │ Node 3 │◄┼───┘               │ │ Node 6 │◄┼───┘
 │ └────────┘ │                   │ └────────┘ │
 │            │                   │            │
 └────────────┘                   └────────────┘
 ```
+
+Here's an annotated configuration example:
+
+```toml
+db_path="/path/to/regionA/node1.db"
+node_id=1
+seq_map_path="/path/to/regionA/node1-seq-map.cbor"
+
+[replication_log]
+shards=2  # Increased for cross-region traffic
+max_entries=2048
+replicas=3
+compress=true  # Compression helps with WAN traffic
+
+[snapshot]
+enabled=true
+store="s3"  # Using S3 for cross-region durability
+interval=3600000
+
+[snapshot.s3]
+endpoint="s3.amazonaws.com"
+path="harmonylite/snapshots"
+bucket="your-backup-bucket"
+use_ssl=true
+access_key="your-access-key"
+secret="your-secret-key"
+
+[nats]
+urls=[]
+bind_address="0.0.0.0:4222"
+reconnect_wait_seconds=5  # Higher for cross-region resilience
+```
+
 
 ### Role-Based Deployment
 
@@ -110,19 +145,8 @@ Ensure the following ports are open between HarmonyLite nodes:
 
 | Port | Protocol | Purpose | Direction |
 |------|----------|---------|-----------|
-| 4222 | TCP | NATS client connections | Bidirectional |
-| 4223-4229 | TCP | NATS cluster connections | Bidirectional |
+| 4222 | TCP | NATS connections | Bidirectional |
 | 3010 | TCP | Prometheus metrics (optional) | Inbound |
-
-### Firewall Rules
-
-When using a firewall, configure it to allow traffic on the required ports. For example, with `ufw`:
-
-```bash
-sudo ufw allow 4222/tcp comment "NATS client"
-sudo ufw allow 4223:4229/tcp comment "NATS cluster"
-sudo ufw allow 3010/tcp comment "Prometheus metrics"
-```
 
 ### Network Latency Considerations
 
