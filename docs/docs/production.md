@@ -215,8 +215,10 @@ server_config = "/etc/harmonylite/nats-server.conf"
 With `/etc/harmonylite/nats-server.conf` containing:
 
 ```
-jetstream {
-  store_dir: "/data/nats/jetstream"
+jetstream = {
+  store_dir = "/data/nats/jetstream/"
+  max_memory_store = 52428800
+  max_file_store = 5368709120
 }
 ```
 
