@@ -228,14 +228,14 @@ For a production environment, always enable authentication:
 
 ```toml
 [nats]
-# For basic authentication
+# For basic username/password authentication
 user_name = "harmonylite"
 user_password = "secure-password-here"
 
-# For TLS authentication
-ca_file = "/etc/harmonylite/ca.pem"
-cert_file = "/etc/harmonylite/client-cert.pem"
-key_file = "/etc/harmonylite/client-key.pem"
+# For NKEY authentication using a seed file
+# Generate a user seed with: nk -gen user > user.seed
+# Reference: https://docs.nats.io/running-a-nats-service/nats_admin/security/jwt#what-are-nkeys
+seed_file = "/path/to/user.seed"
 ```
 
 ## Security Considerations
