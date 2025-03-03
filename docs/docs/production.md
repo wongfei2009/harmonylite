@@ -240,17 +240,8 @@ seed_file = "/path/to/user.seed"
 
 ## Security Considerations
 
-### Database Encryption
-
-SQLite databases can be encrypted using SQLCipher. To use encrypted databases:
-
-1. Build HarmonyLite with SQLCipher support
-2. Configure your application to use encrypted databases
-3. Ensure encryption keys are securely managed
-
 ### Network Security
 
-- Use TLS for all NATS communications
 - Consider using a dedicated VLAN or VPC for node communication
 - Implement network-level access controls (firewall rules, security groups)
 
