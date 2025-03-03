@@ -34,11 +34,11 @@ cleanup() {
 
 trap cleanup EXIT
 rm -rf /tmp/nats
-../harmonylite -config node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/' &
+../harmonylite -config node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/,nats://localhost:4223/' &
 job1=$!
 
 sleep 1
-../harmonylite -config node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/' &
+../harmonylite -config node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/,nats://localhost:4223/' &
 job2=$!
 
 sleep 1

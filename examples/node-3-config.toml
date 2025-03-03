@@ -1,3 +1,12 @@
 seq_map_path="/tmp/harmonylite-3-sm.cbor"
 db_path="/tmp/harmonylite-3.db"
 node_id=3
+
+[replication_log]
+shards=2
+max_entries=2048
+replicas=1
+compress=true
+
+[nats]
+reconnect_wait_seconds=5

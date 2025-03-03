@@ -224,7 +224,7 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 			Expect(err).To(BeNil(), "Failed to read original config file")
 
 			// Append publish=false to the config
-			modifiedConfig := append(originalConfig, []byte("\npublish=false\n")...)
+			modifiedConfig := append([]byte("\npublish=false\n"), originalConfig...)
 			err = os.WriteFile(tmpConfigPath, modifiedConfig, 0644)
 			Expect(err).To(BeNil(), "Failed to write modified config file")
 

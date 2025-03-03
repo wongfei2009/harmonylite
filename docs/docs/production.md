@@ -123,8 +123,6 @@ access_key="your-access-key"
 secret="your-secret-key"
 
 [nats]
-urls=[]
-bind_address="0.0.0.0:4222"
 reconnect_wait_seconds=5  # Higher for cross-region resilience
 ```
 
