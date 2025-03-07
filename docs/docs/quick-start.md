@@ -117,12 +117,23 @@ CREATE TABLE notes (
 EOF
 ```
 
+```bash
+sqlite3 /tmp/harmonylite-2.db <<EOF
+CREATE TABLE notes (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+EOF
+```
+
 ### Step 3: Start the First Node
 
 Start the first HarmonyLite node:
 
 ```bash
-./harmonylite -config node1-config.toml -cluster-addr localhost:4221
+./harmonylite -config node1-config.toml -cluster-addr localhost:4221 -cluster-peers nats://localhost:4222/
 ```
 
 ### Step 4: Start the Second Node
