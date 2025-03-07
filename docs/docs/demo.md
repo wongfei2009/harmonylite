@@ -6,8 +6,8 @@ This guide demonstrates how to set up a practical application using HarmonyLite 
 
 In this demo, you'll:
 
-- Set up a three-node HarmonyLite cluster to replicate the database
-- Configure Pocketbase instances to use these replicated databases
+- Set up a two-node HarmonyLite cluster to replicate the database
+- Configure Pocketbase instances with a predefined schema to use these replicated databases
 - Create a distributed note-taking application with replication
 - Test fault tolerance and recovery
 
@@ -25,13 +25,33 @@ By the end, you'll have a practical understanding of how HarmonyLite works in a 
 Create a directory for our demo and necessary subdirectories:
 
 ```bash
-mkdir -p harmonylite-demo/{pb-1,pb-2,pb-3}
+mkdir -p harmonylite-demo/{pb-1,pb-2}
 cd harmonylite-demo
 ```
 
-## Step 2: Configure HarmonyLite
+## Step 2: Configure and Start Pocketbase
 
-We'll create configuration files for three HarmonyLite nodes, each managing a Pocketbase database.
+Now we'll set up two Pocketbase instances, each connected to a separate database managed by HarmonyLite.
+
+Open two new terminal windows and navigate to the demo directory in each:
+
+**Terminal 1 - Pocketbase 1**:
+```bash
+./pocketbase serve --dir=./pb-1 --http=localhost:8090
+```
+
+**Terminal 2 - Pocketbase 2**:
+```bash
+./pocketbase serve --dir=./pb-2 --http=localhost:8091
+```
+
+You can now access each Pocketbase admin dashboard at:
+- Node 1: http://localhost:8090/_/
+- Node 2: http://localhost:8091/_/
+
+## Step 3: Configure HarmonyLite
+
+We'll create configuration files for two HarmonyLite nodes, each managing a Pocketbase database.
 
 Create the following files:
 
@@ -44,7 +64,7 @@ seq_map_path = "./pb-1/seq-map.cbor"
 [replication_log]
 shards = 1
 max_entries = 1024
-replicas = 3
+replicas = 2
 compress = true
 
 [snapshot]
@@ -62,7 +82,7 @@ seq_map_path = "./pb-2/seq-map.cbor"
 [replication_log]
 shards = 1
 max_entries = 1024
-replicas = 3
+replicas = 2
 compress = true
 
 [snapshot]
@@ -71,127 +91,87 @@ interval = 3600000
 store = "nats"
 ```
 
-**node-3-config.toml**:
-```toml
-database_path = "./pb-3/data.db"
-node_id = 3
-seq_map_path = "./pb-3/seq-map.cbor"
+## Step 4: Start HarmonyLite Nodes
 
-[replication_log]
-shards = 1
-max_entries = 1024
-replicas = 3
-compress = true
+Open two separate terminal windows and start each HarmonyLite node:
 
-[snapshot]
-enabled = true
-interval = 3600000
-store = "nats"
-```
-
-## Step 3: Start HarmonyLite Nodes
-
-Open three separate terminal windows and start each HarmonyLite node:
-
-**Terminal 1 - Node 1**:
+**Terminal 3 - Node 1**:
 ```bash
-harmonylite -config node-1-config.toml -cluster-addr localhost:4221
+harmonylite -config node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/'
 ```
 
-**Terminal 2 - Node 2**:
+**Terminal 4 - Node 2**:
 ```bash
 harmonylite -config node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/'
 ```
 
-**Terminal 3 - Node 3**:
-```bash
-harmonylite -config node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/'
-```
+Verify both nodes are running and connected by checking the log output for successful connection messages.
 
-Verify all nodes are running and connected by checking the log output for successful connection messages.
+## Step 5: Set Up the Admin Account
 
-## Step 4: Configure and Start Pocketbase
 
-Now we'll set up three Pocketbase instances, each connected to a separate database managed by HarmonyLite.
+For Pocketbase instance (Node 1):
 
-Open three new terminal windows and navigate to the demo directory in each:
+**Create an Admin Account**:
+- Open the admin dashboard (e.g., http://localhost:8090/_/ for Node 1)
+- Follow the prompts to create a new admin account
 
-**Terminal 4 - Pocketbase 1**:
-```bash
-cd harmonylite-demo
-./pocketbase serve --dir=./pb-1 --http=localhost:8090
-```
+The admin account will be replicated to Node 2 automatically.
 
-**Terminal 5 - Pocketbase 2**:
-```bash
-cd harmonylite-demo
-./pocketbase serve --dir=./pb-2 --http=localhost:8091
-```
+## Step 6: Set Up the Demo Application Schema
 
-**Terminal 6 - Pocketbase 3**:
-```bash
-cd harmonylite-demo
-./pocketbase serve --dir=./pb-3 --http=localhost:8092
-```
+Since HarmonyLite does not propagate database schemas, we need to manually set up identical schemas in both Pocketbase instances before adding data.
 
-You can now access each Pocketbase admin dashboard at:
-- Node 1: http://localhost:8090/_/
-- Node 2: http://localhost:8091/_/
-- Node 3: http://localhost:8092/_/
+For each Pocketbase instance (Node 1 and Node 2):
 
-## Step 5: Create a Demo Application
+**Create the "notes" Collection**:
+- In the admin dashboard, click "New collection"
+- Name it "notes"
+- Add the following fields:
+   - `title` (text, required)
+   - `content` (text)
+   - `is_important` (boolean)
+- Click "Create"
 
-Let's set up our note-taking application through the Pocketbase Admin UI:
+Repeat this process for the second instance (http://localhost:8091/_/) to ensure both have the same schema.
 
-1. **Create an Admin Account**:
-   - Open http://localhost:8090/_/ in your browser
-   - Follow the prompts to create a new admin account
+## Step 7: Test Replication
 
-2. **Create a Collection**:
-   - In the admin dashboard, click "New collection"
-   - Name it "notes"
-   - Add the following fields:
-     - title (text, required)
-     - content (text)
-     - is_important (boolean)
-   - Click "Create"
+Now let's verify that data replication works across both instances:
 
-3. **Add Sample Data**:
+1. **Add Sample Data in Node 1**:
+   - Open http://localhost:8090/_/
    - Navigate to the "notes" collection
    - Click "New record"
-   - Fill in a title and content
+   - Fill in a title (e.g., "Test Note") and content (e.g., "This is a test")
    - Click "Save"
 
-## Step 6: Test Replication
+2. **Verify Replication in Node 2**:
+   - Wait a few seconds for replication to occur
+   - Open http://localhost:8091/_/
+   - Navigate to the "notes" collection
+   - Check that the note from Node 1 appears
 
-Now let's verify that our data is being replicated across all instances:
+3. **Test Bidirectional Replication**:
+   - In Node 2 (http://localhost:8091/_/), create a new note
+   - Verify it appears in Node 1 (http://localhost:8090/_/)
 
-1. Wait a few seconds for replication to occur
-
-2. Open each Pocketbase admin dashboard and navigate to the "notes" collection:
-   - http://localhost:8091/_/ (Node 2)
-   - http://localhost:8092/_/ (Node 3)
-
-3. You should see the same notes in all three instances
-
-4. Try creating a new note in one of the other instances and verify it appears in all three
-
-## Step 7: Test Fault Tolerance
+## Step 8: Test Fault Tolerance
 
 Let's simulate a node failure to see how the system handles it:
 
-1. Stop one of the HarmonyLite nodes (e.g., press Ctrl+C in Terminal 2)
+1. Stop Node 2 (press Ctrl+C in Terminal 2)
 
-2. Create a new note in one of the remaining nodes
+2. Create a new note in Node 1 via http://localhost:8090/_/
 
-3. The note should still be replicated to the other active node
+3. Verify that Node 1 remains operational and the note is saved locally
 
-4. Now restart the stopped node:
+4. Restart Node 2:
    ```bash
    harmonylite -config node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/'
    ```
 
-5. Verify that the node catches up and receives all the changes that occurred while it was offline
+5. Check Node 2’s "notes" collection (http://localhost:8091/_/) to confirm it catches up and receives the changes made while it was offline
 
 ## Real-World Application Ideas
 
@@ -205,7 +185,7 @@ Now that you have a working HarmonyLite + Pocketbase setup, here are some real-w
 
 ## Conclusion
 
-You've successfully set up a distributed application using HarmonyLite and Pocketbase. This demonstrates how HarmonyLite enables:
+You've successfully set up a distributed application using HarmonyLite and Pocketbase with two nodes. This demonstrates how HarmonyLite enables:
 
 1. **High Availability**: The system continues to function even when nodes go offline
 2. **Horizontal Scaling**: You can add more nodes to handle increased load
