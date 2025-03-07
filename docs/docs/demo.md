@@ -57,7 +57,7 @@ Create the following files:
 
 **node-1-config.toml**:
 ```toml
-database_path = "./pb-1/data.db"
+db_path = "./pb-1/data.db"
 node_id = 1
 seq_map_path = "./pb-1/seq-map.cbor"
 
@@ -75,7 +75,7 @@ store = "nats"
 
 **node-2-config.toml**:
 ```toml
-database_path = "./pb-2/data.db"
+db_path = "./pb-2/data.db"
 node_id = 2
 seq_map_path = "./pb-2/seq-map.cbor"
 
