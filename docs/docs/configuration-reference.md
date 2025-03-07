@@ -1,0 +1,316 @@
+# Configuration Reference
+
+This document provides a comprehensive reference for all HarmonyLite configuration options. Use this guide to understand available settings and fine-tune your deployment.
+
+## Configuration File Format
+
+HarmonyLite uses a TOML configuration file format. By default, it looks for `config.toml` in the current directory, but you can specify a different path with the `-config` command-line parameter.
+
+## Basic Configuration
+
+```toml
+# Database path (required)
+db_path = "/path/to/your.db"
+
+# Unique node identifier (required, integer)
+node_id = 1
+
+# Path to persist sequence map (required)
+seq_map_path = "/path/to/seq-map.cbor"
+
+# Enable/disable publishing changes (optional, default: true)
+publish = true
+
+# Enable/disable replicating changes (optional, default: true)
+replicate = true
+
+# Cleanup interval in milliseconds (optional, default: 60000)
+cleanup_interval = 60000
+```
+
+## Replication Log Settings
+
+```toml
+[replication_log]
+# Number of shards for parallel processing (optional, default: 1)
+shards = 1
+
+# Maximum entries per stream (optional, default: 1024)
+max_entries = 1024
+
+# Number of stream replicas for fault tolerance (optional, default: 1)
+replicas = 3
+
+# Enable zstd compression for change logs (optional, default: false)
+compress = true
+
+# Stream memory buffer size in bytes (optional, default: 1048576)
+buffer_size = 1048576
+
+## Snapshot Settings
+
+```toml
+[snapshot]
+# Enable snapshot support (optional, default: false)
+enabled = true
+
+# Snapshot storage backend (required if enabled)
+# Options: "nats", "s3", "webdav", "sftp"
+store = "nats"
+
+# Snapshot interval in milliseconds (optional, default: 3600000)
+interval = 3600000
+
+# Minimum changes before forcing snapshot (optional, default: 1000)
+min_changes = 1000
+
+# Maximum snapshot age in seconds (optional, default: 86400)
+max_age = 86400
+```
+
+## NATS Configuration
+
+```toml
+[nats]
+# List of NATS server URLs (optional, if empty uses embedded server)
+urls = ["nats://localhost:4222"]
+
+# Prefix for change log subjects (optional, default: "harmonylite-change-log")
+subject_prefix = "harmonylite-change-log"
+
+# Prefix for JetStream streams (optional, default: "harmonylite-changes")
+stream_prefix = "harmonylite-changes"
+
+# Bind address for embedded NATS server (optional, default: "0.0.0.0:4222")
+bind_address = "0.0.0.0:4222"
+
+# Path to custom NATS server config file (optional)
+server_config = "/path/to/nats-server.conf"
+
+# Connection retries for external servers (optional, default: 5)
+connect_retries = 5
+
+# Delay between reconnect attempts in seconds (optional, default: 2)
+reconnect_wait_seconds = 2
+
+# Authentication username (optional)
+user_name = "harmonylite"
+
+# Authentication password (optional)
+user_password = "secure-password-here"
+
+# Path to NKEY seed file (optional)
+seed_file = "/path/to/user.seed"
+```
+
+## NATS Snapshot Storage
+
+```toml
+[snapshot.nats]
+# Number of snapshot replicas (optional, default: 1)
+replicas = 2
+
+# Bucket name for object storage (optional)
+bucket = "harmonylite-snapshots"
+```
+
+## S3 Snapshot Storage
+
+```toml
+[snapshot.s3]
+# S3 endpoint (required for S3 storage)
+endpoint = "s3.amazonaws.com"
+
+# Path prefix inside bucket (optional)
+path = "harmonylite/snapshots"
+
+# Bucket name (required for S3 storage)
+bucket = "your-backup-bucket"
+
+# Use SSL for connections (optional, default: true)
+use_ssl = true
+
+# Access key for authentication (required for S3 storage)
+access_key = "your-access-key"
+
+# Secret key for authentication (required for S3 storage)
+secret = "your-secret-key"
+
+# Region name (optional)
+region = "us-west-2"
+
+# Custom part size for multipart uploads in bytes (optional, default: 5242880)
+part_size = 5242880
+```
+
+## WebDAV Snapshot Storage
+
+```toml
+[snapshot.webdav]
+# WebDAV server URL (required for WebDAV storage)
+endpoint = "https://webdav.example.com"
+
+# Path prefix on server (optional)
+path = "harmonylite/snapshots"
+
+# Username for authentication (optional)
+username = "webdav-user"
+
+# Password for authentication (optional)
+password = "webdav-password"
+```
+
+## SFTP Snapshot Storage
+
+```toml
+[snapshot.sftp]
+# SFTP server address (required for SFTP storage)
+endpoint = "sftp.example.com:22"
+
+# Path on remote server (optional, default: "/")
+path = "/harmonylite/snapshots"
+
+# Username for authentication (required for SFTP storage)
+username = "sftp-user"
+
+# Password for authentication (optional)
+password = "sftp-password"
+
+# Path to private key file for authentication (optional)
+key_file = "/path/to/id_rsa"
+
+# Passphrase for encrypted private key (optional)
+passphrase = "key-passphrase"
+```
+
+## Logging Configuration
+
+```toml
+[logging]
+# Enable verbose logging (optional, default: false)
+verbose = true
+
+# Log format (optional, default: "console")
+# Options: "console", "json"
+format = "json"
+
+# Log level (optional, default: "info")
+# Options: "debug", "info", "warn", "error"
+level = "info"
+
+# Path to log file (optional, if empty logs to stdout)
+file = "/var/log/harmonylite.log"
+```
+
+## Prometheus Metrics
+
+```toml
+[prometheus]
+# Enable Prometheus metrics (optional, default: false)
+enable = true
+
+# Metrics HTTP listener address (optional, default: "0.0.0.0:3010")
+bind = "0.0.0.0:3010"
+
+# Metrics namespace (optional, default: "harmonylite")
+namespace = "harmonylite"
+
+# Metrics subsystem (optional, default: "replication")
+subsystem = "replication"
+```
+
+## Example Configurations
+
+### Basic Single Node
+
+```toml
+db_path = "/path/to/data.db"
+node_id = 1
+seq_map_path = "/path/to/seq-map.cbor"
+
+[replication_log]
+shards = 1
+max_entries = 1024
+replicas = 1
+```
+
+### Production Cluster
+
+```toml
+db_path = "/var/lib/harmonylite/data.db"
+node_id = 1
+seq_map_path = "/var/lib/harmonylite/seq-map.cbor"
+cleanup_interval = 30000
+
+[replication_log]
+shards = 4
+max_entries = 2048
+replicas = 3
+compress = true
+
+[snapshot]
+enabled = true
+store = "s3"
+interval = 1800000
+
+[snapshot.s3]
+endpoint = "s3.amazonaws.com"
+path = "harmonylite/snapshots"
+bucket = "your-backup-bucket"
+use_ssl = true
+access_key = "your-access-key"
+secret = "your-secret-key"
+region = "us-west-2"
+
+[nats]
+urls = ["nats://nats-server-1:4222", "nats://nats-server-2:4222"]
+connect_retries = 10
+reconnect_wait_seconds = 5
+
+[prometheus]
+enable = true
+bind = "0.0.0.0:3010"
+
+[logging]
+verbose = true
+format = "json"
+file = "/var/log/harmonylite.log"
+```
+
+### Edge Node (Read-Only)
+
+```toml
+db_path = "/var/lib/harmonylite/data.db"
+node_id = 5
+seq_map_path = "/var/lib/harmonylite/seq-map.cbor"
+publish = false  # Don't publish changes
+replicate = true  # Only receive changes
+
+[replication_log]
+shards = 2
+max_entries = 1024
+replicas = 2
+
+[nats]
+urls = ["nats://central-nats:4222"]
+reconnect_wait_seconds = 10
+```
+
+## Command-Line Options
+
+In addition to the configuration file, HarmonyLite accepts several command-line parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `-config` | Path to configuration file |
+| `-cluster-addr` | Embedded NATS server cluster address |
+| `-cluster-peers` | Comma-separated list of peer URLs |
+| `-cleanup` | Clean up triggers and log tables |
+| `-save-snapshot` | Force snapshot creation |
+| `-version` | Show version information |
+| `-help` | Display help information |
+
+Example usage:
+```bash
+harmonylite -config /etc/harmonylite/config.toml -cluster-addr 127.0.0.1:4222 -cluster-peers nats://127.0.0.1:4223/
+```
