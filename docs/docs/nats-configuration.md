@@ -83,7 +83,28 @@ harmonylite -config config.toml
 - Additional infrastructure to manage
 - More complex initial setup
 
-## Optimizing NATS Storage
+## NATS JetStream Configuration
+
+JetStream is NATS' persistence layer and is critical for HarmonyLite's replication. Here are key configuration parameters:
+
+### Stream Settings
+
+```toml
+[replication_log]
+# Number of streams to distribute changes
+shards = 4
+
+# Maximum stored messages per stream before purging old messages
+max_entries = 1024
+
+# Number of replicas for fault tolerance
+replicas = 3
+
+# Enable message compression to save bandwidth/storage
+compress = true
+```
+
+## Optimizing NATS JetStream Storage
 
 By default, NATS JetStream writes data to temporary directories, which isn't ideal for production. Here's how to configure a dedicated storage location:
 
@@ -156,27 +177,6 @@ urls = ["tls://nats-server:4222"]
 tls_ca_file = "/etc/harmonylite/ca.pem"
 tls_cert_file = "/etc/harmonylite/client-cert.pem"
 tls_key_file = "/etc/harmonylite/client-key.pem"
-```
-
-## NATS JetStream Configuration
-
-JetStream is NATS' persistence layer and is critical for HarmonyLite's replication. Here are key configuration parameters:
-
-### Stream Settings
-
-```toml
-[replication_log]
-# Number of streams to distribute changes
-shards = 4
-
-# Maximum stored messages per stream before purging old messages
-max_entries = 1024
-
-# Number of replicas for fault tolerance
-replicas = 3
-
-# Enable message compression to save bandwidth/storage
-compress = true
 ```
 
 ## Monitoring NATS
