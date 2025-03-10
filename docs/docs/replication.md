@@ -453,21 +453,6 @@ Monitor these metrics for replication health:
    harmonylite_scan_changes
    ```
 
-4. **Replication Lag**: Time difference between nodes
-   ```
-   harmonylite_replication_lag
-   ```
-
-### Log Messages
-
-Watch for these key log patterns:
-
-- `"Published change record"`: Successful publication
-- `"Applied change record"`: Successful application
-- `"Unable to publish"`: Publication failures
-- `"Conflict detected"`: Conflict resolution occurring
-- `"Skipping own change"`: Normal operation for self-published changes
-
 ## Troubleshooting Replication
 
 ### Common Issues
