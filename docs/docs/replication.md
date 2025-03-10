@@ -417,61 +417,6 @@ graph TB
     style R4 fill:#bbdefb
 ```
 
-Configure read-only nodes with:
-```toml
-# Read-only nodes don't publish changes
-publish = false
-replicate = true
-```
-
-## Monitoring Replication
-
-### Key Metrics to Watch
-
-Monitor these metrics for replication health:
-
-1. **Published Changes**: Rate of change publishing
-   ```
-   harmonylite_published
-   ```
-
-2. **Pending Changes**: Changes waiting for publication
-   ```
-   harmonylite_pending_publish
-   ```
-
-3. **Processing Latency**: Time to process changes
-   ```
-   harmonylite_count_changes
-   harmonylite_scan_changes
-   ```
-
-## Troubleshooting Replication
-
-### Common Issues
-
-1. **Changes not propagating**:
-   - Check NATS connectivity
-   - Verify trigger installation
-   - Ensure `PRAGMA trusted_schema = ON`
-   - Check the `publish` and `replicate` settings
-
-2. **High replication latency**:
-   - Increase the number of shards
-   - Enable compression for large changes
-   - Check network performance
-   - Tune the cleanup interval
-
-3. **Conflicts and lost updates**:
-   - Review your application's update patterns
-   - Consider implementing application-level conflict handling
-   - Use transactions where appropriate
-
-4. **Database locks during replication**:
-   - Ensure proper WAL mode configuration
-   - Set appropriate timeout values
-   - Check for long-running transactions
-
 ## Conclusion
 
 HarmonyLite's replication mechanism provides a flexible, efficient way to maintain database consistency across distributed nodes. By understanding these internals, you can better optimize, monitor, and troubleshoot your deployment.
