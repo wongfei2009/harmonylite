@@ -179,13 +179,6 @@ replicas = 3
 compress = true
 ```
 
-### Consumer Settings
-
-HarmonyLite automatically creates durable consumers for each node. The naming convention is:
-- `harmonylite-node-<node_id>-<stream_name>-consumer`
-
-For example: `harmonylite-node-1-harmonylite-changes-1-consumer`
-
 ## Multi-Region Deployment
 
 For globally distributed applications, NATS can be configured to optimize cross-region traffic:
