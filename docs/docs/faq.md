@@ -50,13 +50,13 @@ HarmonyLite uses a multi-step process for replication:
 
 ### What is the maximum number of nodes supported?
 
-HarmonyLite has been tested with dozens of nodes. The practical limit depends on:
+The codebase has been tested with at least three nodes in its end-to-end tests. The practical limit depends on:
 - Network bandwidth and latency
 - Write volume and patterns
 - Hardware resources
 - NATS JetStream configuration
 
-For most use cases, 3-20 nodes provides a good balance of availability and performance.
+While the architecture can theoretically scale to many nodes, you should conduct your own performance testing for deployments with more than a few nodes.
 
 ### Does HarmonyLite require code changes to my application?
 
@@ -90,10 +90,12 @@ HarmonyLite requires SQLite version 3.35.0 or newer. This version introduced the
 ### How much overhead does HarmonyLite add?
 
 The overhead varies depending on your workload:
-- **Storage**: Change log tables add 20-100% overhead depending on change frequency
-- **CPU**: Minimal impact for read operations, 5-15% for write operations
-- **Latency**: Local operations typically add 1-5ms overhead
-- **Replication Delay**: Usually 50-500ms depending on network conditions
+- **Storage**: Change log tables add overhead depending on change frequency and retention settings
+- **CPU**: Some impact for write operations due to trigger execution
+- **Latency**: Local operations add some overhead for capturing changes
+- **Replication Delay**: Depends on network conditions between nodes
+
+Actual performance characteristics should be measured in your specific environment and use case.
 
 ## Deployment Questions
 
@@ -138,21 +140,25 @@ Yes, HarmonyLite supports read-only replica configurations:
 
 ### How many transactions per second can HarmonyLite handle?
 
-Performance depends on many factors, but general guidelines:
-- **Single node write throughput**: 1,000-5,000 TPS
-- **Cluster write throughput**: Similar to single node (eventual consistency)
-- **Read throughput**: Scales linearly with number of nodes
+Performance will vary significantly based on:
+- Hardware specifications (CPU, memory, disk speed)
+- Network latency and bandwidth
+- Transaction complexity and size
+- Database size and schema
+- Number of nodes in the cluster
 
-These numbers can vary significantly based on hardware, network, and workload patterns.
+We recommend benchmarking with your specific workload to determine realistic performance expectations for your environment.
 
 ### How does HarmonyLite perform with large databases?
 
-HarmonyLite works with databases ranging from megabytes to many gigabytes:
-- For large databases (10GB+), consider:
+HarmonyLite works with databases of various sizes:
+- For large databases, consider:
   - More frequent snapshots
   - Higher `cleanup_interval` values
   - SSD storage for better performance
   - Tuning SQLite's cache size in your application
+
+The practical limits of database size depend on your hardware, network, and workload characteristics.
 
 ### How do I optimize HarmonyLite for my workload?
 
