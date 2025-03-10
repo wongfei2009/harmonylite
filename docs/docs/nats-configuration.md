@@ -112,7 +112,7 @@ By default, NATS JetStream writes data to temporary directories, which isn't ide
 
 1. **Create a NATS Config File**:
 
-   ```
+   ```nats
    # nats-server.conf
    jetstream {
      store_dir: "/var/lib/harmonylite/jetstream"
@@ -134,7 +134,7 @@ By default, NATS JetStream writes data to temporary directories, which isn't ide
    sudo mkdir -p /var/lib/harmonylite/jetstream
    sudo chown harmonylite:harmonylite /var/lib/harmonylite/jetstream
    ```
-   
+
 ## Security Configuration
 
 ### Authentication Options
@@ -181,39 +181,90 @@ tls_key_file = "/etc/harmonylite/client-key.pem"
 
 ## Monitoring NATS
 
-### Built-in Monitoring Endpoint
+Monitoring is essential for maintaining the health and performance of your NATS server, especially in production environments. NATS provides a built-in monitoring server that exposes various metrics and endpoints for real-time insights.
 
-NATS includes a built-in monitoring endpoint accessible via HTTP:
+### Enabling the Monitoring Server
 
-```
-http://nats-server:8222/
-```
+The monitoring server is enabled by configuring the `monitor_port` in your NATS server configuration:
 
-This provides information about:
-- Server status and connections
-- JetStream status
-- Cluster status
-- Stream and consumer metrics
-
-### Prometheus Integration
-
-Enable Prometheus metrics in your NATS server configuration:
-
-```
-http_port: 8222
-
-
-prometheus {
-  port: 7777
-}
+```nats
+monitor_port = 8222
 ```
 
-### Key Metrics to Monitor
+### Accessing Monitoring Endpoints
 
-| Metric | Description | Alert Threshold |
-|--------|-------------|----------------|
-| `nats_jetstream_messages_count` | Total stored messages | N/A (trend) |
-| `nats_jetstream_bytes_used` | Storage usage | >80% capacity |
-| `nats_jetstream_consumer_ack_pending` | Pending message acknowledgments | >1000 for >5 min |
-| `nats_jetstream_consumer_delivered_msgs` | Messages delivered to consumers | N/A (trend) |
-| `nats_server_connections` | Connected clients | >90% of configured maximum |
+The monitoring server provides several HTTP endpoints that expose critical metrics:
+
+#### 1. **Server Health and Metrics**
+   - **Endpoint:** `http://<server-ip>:8222/varz`
+   - **Description:** Provides server health information including uptime, memory usage, and CPU usage
+   - **Usage:** 
+   ```bash
+   curl http://localhost:8222/varz
+   ```
+
+#### 2. **Connection Information**
+   - **Endpoint:** `http://<server-ip>:8222/connz`
+   - **Description:** Provides information about current client connections
+   - **Usage:**
+   ```bash
+   curl http://localhost:8222/connz
+   ```
+
+#### 3. **Route Information**
+   - **Endpoint:** `http://<server-ip>:8222/routez`
+   - **Description:** Provides information about routes between NATS servers in a cluster
+   - **Usage:**
+   ```bash
+   curl http://localhost:8222/routez
+   ```
+
+#### 4. **Subscription Information**
+   - **Endpoint:** `http://<server-ip>:8222/subsz`
+   - **Description:** Provides information about current subscriptions
+   - **Usage:**
+   ```bash
+   curl http://localhost:8222/subsz
+   ```
+
+#### 5. **JetStream Information**
+   - **Endpoint:** `http://<server-ip>:8222/jsz`
+   - **Description:** Provides information about JetStream usage
+   - **Usage:**
+   ```bash
+   curl http://localhost:8222/jsz
+   ```
+
+### Integrating with Prometheus
+
+NATS can be integrated with Prometheus for advanced monitoring:
+
+1. **Install the NATS Prometheus Exporter:**
+   ```bash
+   wget https://github.com/nats-io/prometheus-nats-exporter/releases/download/vX.X.X/prometheus-nats-exporter-vX.X.X-linux-amd64.tar.gz
+   tar -xzf prometheus-nats-exporter-vX.X.X-linux-amd64.tar.gz
+   ```
+
+2. **Configure the Exporter:**
+   ```bash
+   ./prometheus-nats-exporter -varz_url http://localhost:8222/varz -connz_url http://localhost:8222/connz -routez_url http://localhost:8222/routez -subsz_url http://localhost:8222/subsz -jsz_url http://localhost:8222/jsz
+   ```
+
+3. **Add the Exporter to Prometheus:**
+   ```yaml
+   scrape_configs:
+     - job_name: 'nats'
+       static_configs:
+         - targets: ['localhost:7777']  # Default exporter port
+   ```
+
+4. **Visualize Metrics in Grafana:**
+   - Use Grafana to create dashboards for the collected metrics
+
+### Visualizing Metrics with Metricat
+
+[Metricat](https://metricat.dev/) provides an alternative for real-time metric visualization:
+
+1. Install Metricat following the instructions on their website
+2. Configure Metricat to connect to your NATS monitoring endpoints
+3. Use Metricat's interface to create dashboards for real-time monitoring
