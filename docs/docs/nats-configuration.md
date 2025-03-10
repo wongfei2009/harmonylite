@@ -26,20 +26,19 @@ The simplest approach is to use HarmonyLite's embedded NATS server, which is ena
 [nats]
 # Empty URLs array = use embedded server
 urls = []
-bind_address = "0.0.0.0:4222"
 ```
 
 #### Starting a Cluster with Embedded NATS:
 
 ```bash
 # Node 1
-harmonylite -config node1-config.toml -cluster-addr 127.0.0.1:4221
+harmonylite -config node1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/,nats://localhost:4223/'
 
-# Node 2 (referencing Node 1)
-harmonylite -config node2-config.toml -cluster-addr 127.0.0.1:4222 -cluster-peers nats://127.0.0.1:4221/
+# Node 2
+harmonylite -config node2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/,nats://localhost:4223/'
 
-# Node 3 (referencing Nodes 1 and 2)
-harmonylite -config node3-config.toml -cluster-addr 127.0.0.1:4223 -cluster-peers nats://127.0.0.1:4221/,nats://127.0.0.1:4222/
+# Node 3
+harmonylite -config node3-config.toml -cluster-addr 127.0.0.1:4223 -cluster-peers 'nats://127.0.0.1:4221/,nats://127.0.0.1:4222/'
 ```
 
 #### Benefits:
