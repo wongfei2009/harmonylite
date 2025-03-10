@@ -103,8 +103,8 @@ SELECT COUNT(*) FROM __harmonylite___global_change_log;
 
 4. **Config file problems**:
    ```bash
-   # Check config syntax
-   /path/to/harmonylite -config /path/to/config.toml -check
+   # Validate config manually
+   cat /path/to/config.toml
    ```
 
 #### Problem: Configuration Validation Errors
@@ -268,13 +268,13 @@ SELECT COUNT(*) FROM __harmonylite___global_change_log;
 2. **Restore from snapshot**:
    ```bash
    # Stop HarmonyLite
-   harmonylite -config /path/to/config.toml -stop
+   systemctl stop harmonylite
    
    # Remove corrupt database
    rm /path/to/your.db
    
    # Restart to trigger recovery
-   harmonylite -config /path/to/config.toml
+   systemctl start harmonylite
    ```
 
 3. **Recover from backup**:
@@ -286,7 +286,7 @@ SELECT COUNT(*) FROM __harmonylite___global_change_log;
    rm /path/to/seq-map.cbor
    
    # Restart HarmonyLite
-   harmonylite -config /path/to/config.toml
+   systemctl start harmonylite
    ```
 
 ### Snapshot and Recovery
@@ -374,7 +374,7 @@ SELECT COUNT(*) FROM __harmonylite___global_change_log;
    rm /path/to/seq-map.cbor
    
    # Restart
-   harmonylite -config /path/to/config.toml
+   systemctl start harmonylite
    ```
 
 4. **Check logs for specific errors**:
@@ -531,6 +531,30 @@ SELECT COUNT(*) FROM __harmonylite___global_change_log;
    nats stream rm harmonylite-changes-1 --server nats://server:4222
    # Then restart HarmonyLite
    ```
+
+### Sleep Timeout and Serverless Operation
+
+#### Problem: HarmonyLite Exits Unexpectedly
+
+**Symptoms**:
+- Process terminates after a period of inactivity
+- Log shows "No more events to process, initiating shutdown"
+
+**Solutions**:
+
+1. **Check sleep timeout setting**:
+   ```toml
+   # Disable automatic shutdown by setting to 0 (default)
+   sleep_timeout = 0
+   ```
+
+2. **Adjust timeout duration** if you want the serverless behavior:
+   ```toml
+   # Set longer timeout in milliseconds, e.g., 30 minutes
+   sleep_timeout = 1800000
+   ```
+
+3. **Ensure your orchestration system** can handle the expected restarts if using serverless mode
 
 ## Fixing Triggers and Schema Issues
 
