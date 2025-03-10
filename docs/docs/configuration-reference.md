@@ -24,8 +24,18 @@ publish = true
 # Enable/disable replicating changes (optional, default: true)
 replicate = true
 
-# Cleanup interval in milliseconds (optional, default: 60000)
-cleanup_interval = 60000
+# Number of maximum rows to process per batch (optional, default: 512)
+scan_max_changes = 512
+
+# Cleanup interval in milliseconds (optional, default: 5000)
+cleanup_interval = 5000
+
+# Sleep timeout in milliseconds for serverless environments (optional, default: 0, disabled)
+sleep_timeout = 0
+
+# Polling interval in milliseconds (optional, default: 0, disabled)
+# Only useful for broken or buggy file system watchers
+polling_interval = 0
 ```
 
 ## Replication Log Settings
@@ -44,6 +54,9 @@ replicas = 3
 # Enable zstd compression for change logs (optional, default: false)
 compress = true
 
+# Update existing stream if configurations don't match (optional, default: false)
+update_existing = false
+```
 
 ## Snapshot Settings
 
@@ -56,14 +69,10 @@ enabled = true
 # Options: "nats", "s3", "webdav", "sftp"
 store = "nats"
 
-# Snapshot interval in milliseconds (optional, default: 3600000)
+# Snapshot interval in milliseconds (optional, default: 0, disabled)
+# If there was a snapshot saved within interval range due to log threshold triggers, 
+# then new snapshot won't be saved
 interval = 3600000
-
-# Minimum changes before forcing snapshot (optional, default: 1000)
-min_changes = 1000
-
-# Maximum snapshot age in seconds (optional, default: 86400)
-max_age = 86400
 ```
 
 ## NATS Configuration
@@ -99,6 +108,11 @@ user_password = "secure-password-here"
 
 # Path to NKEY seed file (optional)
 seed_file = "/path/to/user.seed"
+
+# TLS configuration (optional)
+ca_file = "/path/to/ca.pem"
+cert_file = "/path/to/client-cert.pem"
+key_file = "/path/to/client-key.pem"
 ```
 
 ## NATS Snapshot Storage
@@ -125,7 +139,7 @@ path = "harmonylite/snapshots"
 # Bucket name (required for S3 storage)
 bucket = "your-backup-bucket"
 
-# Use SSL for connections (optional, default: true)
+# Use SSL for connections (optional, default: false)
 use_ssl = true
 
 # Access key for authentication (required for S3 storage)
@@ -134,51 +148,24 @@ access_key = "your-access-key"
 # Secret key for authentication (required for S3 storage)
 secret = "your-secret-key"
 
-# Region name (optional)
-region = "us-west-2"
-
-# Custom part size for multipart uploads in bytes (optional, default: 5242880)
-part_size = 5242880
+# Session token (optional)
+session_token = ""
 ```
 
 ## WebDAV Snapshot Storage
 
 ```toml
 [snapshot.webdav]
-# WebDAV server URL (required for WebDAV storage)
-endpoint = "https://webdav.example.com"
-
-# Path prefix on server (optional)
-path = "harmonylite/snapshots"
-
-# Username for authentication (optional)
-username = "webdav-user"
-
-# Password for authentication (optional)
-password = "webdav-password"
+# WebDAV server URL with parameters (required for WebDAV storage)
+url = "https://<webdav_server>/<web_dav_path>?dir=/snapshots/path/for/harmonylite&login=<username>&secret=<password>"
 ```
 
 ## SFTP Snapshot Storage
 
 ```toml
 [snapshot.sftp]
-# SFTP server address (required for SFTP storage)
-endpoint = "sftp.example.com:22"
-
-# Path on remote server (optional, default: "/")
-path = "/harmonylite/snapshots"
-
-# Username for authentication (required for SFTP storage)
-username = "sftp-user"
-
-# Password for authentication (optional)
-password = "sftp-password"
-
-# Path to private key file for authentication (optional)
-key_file = "/path/to/id_rsa"
-
-# Passphrase for encrypted private key (optional)
-passphrase = "key-passphrase"
+# SFTP server URL with credentials (required for SFTP storage)
+url = "sftp://<user>:<password>@<sftp_server>:<port>/path/to/save/snapshot"
 ```
 
 ## Logging Configuration
@@ -191,13 +178,6 @@ verbose = true
 # Log format (optional, default: "console")
 # Options: "console", "json"
 format = "json"
-
-# Log level (optional, default: "info")
-# Options: "debug", "info", "warn", "error"
-level = "info"
-
-# Path to log file (optional, if empty logs to stdout)
-file = "/var/log/harmonylite.log"
 ```
 
 ## Prometheus Metrics
@@ -213,8 +193,8 @@ bind = "0.0.0.0:3010"
 # Metrics namespace (optional, default: "harmonylite")
 namespace = "harmonylite"
 
-# Metrics subsystem (optional, default: "replication")
-subsystem = "replication"
+# Metrics subsystem (optional, default: "")
+subsystem = ""
 ```
 
 ## Example Configurations
@@ -249,7 +229,7 @@ compress = true
 [snapshot]
 enabled = true
 store = "s3"
-interval = 1800000
+interval = 3600000
 
 [snapshot.s3]
 endpoint = "s3.amazonaws.com"
@@ -258,7 +238,6 @@ bucket = "your-backup-bucket"
 use_ssl = true
 access_key = "your-access-key"
 secret = "your-secret-key"
-region = "us-west-2"
 
 [nats]
 urls = ["nats://nats-server-1:4222", "nats://nats-server-2:4222"]
@@ -272,7 +251,6 @@ bind = "0.0.0.0:3010"
 [logging]
 verbose = true
 format = "json"
-file = "/var/log/harmonylite.log"
 ```
 
 ### Edge Node (Read-Only)
@@ -303,9 +281,10 @@ In addition to the configuration file, HarmonyLite accepts several command-line 
 | `-config` | Path to configuration file |
 | `-cluster-addr` | Embedded NATS server cluster address |
 | `-cluster-peers` | Comma-separated list of peer URLs |
+| `-leaf-servers` | Comma-separated list of leaf servers |
 | `-cleanup` | Clean up triggers and log tables |
 | `-save-snapshot` | Force snapshot creation |
-| `-version` | Show version information |
+| `-pprof` | Enable profiling server on specified address |
 | `-help` | Display help information |
 
 Example usage:
