@@ -393,13 +393,6 @@ graph TB
     style E4 fill:#bbdefb
 ```
 
-Configure edge nodes with:
-```toml
-# Edge nodes primarily consume updates
-publish = true   # Can publish when needed
-replicate = true # Always receive updates from hub
-```
-
 ### Read Scaling Pattern
 
 For read-heavy workloads:

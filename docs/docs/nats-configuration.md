@@ -179,60 +179,6 @@ replicas = 3
 compress = true
 ```
 
-## Multi-Region Deployment
-
-For globally distributed applications, NATS can be configured to optimize cross-region traffic:
-
-```mermaid
-graph TB
-    subgraph "Region A"
-    A[NATS Server A] --- B[NATS Server B]
-    B --- C[NATS Server C]
-    end
-    
-    subgraph "Region B"
-    D[NATS Server D] --- E[NATS Server E]
-    E --- F[NATS Server F]
-    end
-    
-    A -.-> D
-    C -.-> F
-    
-    style A fill:#bbdefb
-    style B fill:#bbdefb
-    style C fill:#bbdefb
-    style D fill:#c8e6c9
-    style E fill:#c8e6c9
-    style F fill:#c8e6c9
-```
-
-### Configuration Approach
-
-1. **Deploy a Full NATS Cluster in Each Region**
-
-2. **Configure Gateway Connections Between Regions**:
-   ```
-   # NATS server config in Region A
-   gateway {
-     name: "region-a"
-     port: 7222
-     gateways: [
-       {name: "region-b", url: "nats://region-b-gateway:7222"}
-     ]
-   }
-   ```
-
-3. **Configure HarmonyLite to Connect to Local NATS Servers**:
-   ```toml
-   # For nodes in Region A
-   [nats]
-   urls = ["nats://region-a-server-1:4222", "nats://region-a-server-2:4222"]
-   
-   # For nodes in Region B
-   [nats]
-   urls = ["nats://region-b-server-1:4222", "nats://region-b-server-2:4222"]
-   ```
-
 ## Monitoring NATS
 
 ### Built-in Monitoring Endpoint
