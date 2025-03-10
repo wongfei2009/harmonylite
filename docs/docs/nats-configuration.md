@@ -113,20 +113,7 @@ By default, NATS JetStream writes data to temporary directories, which isn't ide
    sudo mkdir -p /var/lib/harmonylite/jetstream
    sudo chown harmonylite:harmonylite /var/lib/harmonylite/jetstream
    ```
-
-### For External NATS Server
-
-Configure storage settings in your NATS server configuration:
-
-```
-# External NATS server config
-jetstream {
-  store_dir: "/var/lib/nats/jetstream"
-  max_memory_store: 1073741824  # 1GB memory
-  max_file_store: 10737418240  # 10GB disk
-}
-```
-
+   
 ## Security Configuration
 
 ### Authentication Options
