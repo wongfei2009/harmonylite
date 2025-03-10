@@ -38,7 +38,7 @@ harmonylite -config node1-config.toml -cluster-addr localhost:4221 -cluster-peer
 harmonylite -config node2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/,nats://localhost:4223/'
 
 # Node 3
-harmonylite -config node3-config.toml -cluster-addr 127.0.0.1:4223 -cluster-peers 'nats://127.0.0.1:4221/,nats://127.0.0.1:4222/'
+harmonylite -config node3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/'
 ```
 
 #### Benefits:
