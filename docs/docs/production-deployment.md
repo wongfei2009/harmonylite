@@ -614,7 +614,6 @@ Adjust these parameters based on your workload:
 [replication_log]
 shards = 8
 max_entries = 4096
-buffer_size = 2097152  # 2MB
 
 # Low latency priority
 cleanup_interval = 15000  # 15 seconds
@@ -664,7 +663,6 @@ cleanup_interval = 15000  # 15 seconds
 **Symptoms**: High memory usage or out-of-memory errors.
 
 **Solutions**:
-- Tune `buffer_size` to lower value
 - Decrease `max_entries` if very large
 - Check for memory leaks in applications
 - Consider increasing server memory

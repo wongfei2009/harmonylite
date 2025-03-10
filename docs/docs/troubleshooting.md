@@ -447,13 +447,7 @@ SELECT COUNT(*) FROM __harmonylite___global_change_log;
    0 4 * * * systemctl restart harmonylite
    ```
 
-4. **Reduce buffer sizes**:
-   ```toml
-   [replication_log]
-   buffer_size = 524288  # 512KB instead of default
-   ```
-
-5. **Update to latest version** as memory leaks are often fixed in updates
+4. **Update to latest version** as memory leaks are often fixed in updates
 
 ### NATS Issues
 

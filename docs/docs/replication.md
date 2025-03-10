@@ -303,12 +303,6 @@ To improve replication performance:
    cleanup_interval = 60000  # 1 minute
    ```
 
-4. **Adjust Buffer Size** for memory/performance balance:
-   ```toml
-   [replication_log]
-   buffer_size = 2097152  # 2MB
-   ```
-
 ### Transaction Batching
 
 When making multiple changes, use transactions to reduce overhead:

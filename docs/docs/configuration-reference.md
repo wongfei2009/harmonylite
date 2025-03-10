@@ -44,8 +44,6 @@ replicas = 3
 # Enable zstd compression for change logs (optional, default: false)
 compress = true
 
-# Stream memory buffer size in bytes (optional, default: 1048576)
-buffer_size = 1048576
 
 ## Snapshot Settings
 
