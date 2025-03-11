@@ -40,8 +40,6 @@ curl http://localhost:8222/jsz
 # List streams
 curl http://localhost:8222/jsz?streams=1
 
-# Check specific stream
-curl http://localhost:8222/jsz?stream=harmonylite-changes-1
 ```
 
 ### SQLite Analysis
