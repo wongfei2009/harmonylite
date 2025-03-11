@@ -8,12 +8,25 @@ Before diving into specific issues, familiarize yourself with these diagnostic t
 
 ### Log Analysis
 
-HarmonyLite logs provide valuable troubleshooting information. Enable verbose logging temporarily:
+HarmonyLite logs provide valuable troubleshooting information. When using systemd, logs are sent to the journal. Enable verbose logging temporarily by modifying your config:
 
 ```toml
 [logging]
 verbose = true
 format = "json"  # or "console" for human-readable format
+```
+
+Access logs using journalctl:
+
+```bash
+# View all logs for the HarmonyLite service
+journalctl -u harmonylite
+
+# View recent logs
+journalctl -u harmonylite -n 100
+
+# Follow logs in real-time
+journalctl -u harmonylite -f
 ```
 
 ### Prometheus Metrics
@@ -377,7 +390,7 @@ SELECT COUNT(*) FROM __harmonylite___change_log_global;
 
 4. **Check logs for specific errors**:
    ```bash
-   grep "snapshot" /var/log/harmonylite/harmonylite.log
+   journalctl -u harmonylite | grep "snapshot"
    ```
 
 ### Performance Issues
@@ -640,7 +653,7 @@ If a node is completely corrupted or needs to be rebuilt:
 
 4. **Monitor logs** for recovery progress:
    ```bash
-   tail -f /var/log/harmonylite/harmonylite.log
+   journalctl -u harmonylite -f
    ```
 
 ### Manual Database Repair
@@ -708,7 +721,7 @@ If you're still having issues after following this guide:
    # Create diagnostic bundle
    mkdir -p /tmp/harmonylite-diag
    cp /etc/harmonylite/config.toml /tmp/harmonylite-diag/
-   cp /var/log/harmonylite/harmonylite.log /tmp/harmonylite-diag/
+   journalctl -u harmonylite -n 1000 > /tmp/harmonylite-diag/journal-logs.txt
    curl http://localhost:3010/metrics > /tmp/harmonylite-diag/metrics.txt
    curl http://localhost:8222/varz > /tmp/harmonylite-diag/nats-varz.json
    curl http://localhost:8222/jsz > /tmp/harmonylite-diag/nats-jsz.json
