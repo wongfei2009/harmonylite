@@ -59,7 +59,7 @@ SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE '__harmonylite
 SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '__harmonylite%';
 
 -- Count pending changes
-SELECT COUNT(*) FROM __harmonylite___global_change_log;
+SELECT COUNT(*) FROM __harmonylite___change_log_global;
 ```
 
 ## Common Issues and Solutions
