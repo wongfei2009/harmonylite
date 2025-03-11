@@ -17,3 +17,7 @@ server_config = "examples/nats-server-3.conf"
 [logging]
 verbose = false
 format = "console"
+
+[prometheus]
+enable = true
+bind = "0.0.0.0:3012"
