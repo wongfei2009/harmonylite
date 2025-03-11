@@ -696,19 +696,20 @@ For advanced recovery when automatic procedures fail:
 
 ## Diagnostic Commands Reference
 
-| Issue | Diagnostic Command | What to Look For |
-|-------|-------------------|------------------|
-| Node Status | `systemctl status harmonylite` | Active (running) status |
-| Logs | `journalctl -u harmonylite -n 100` | Recent error messages |
-| Process Resources | `ps -o pid,%cpu,%mem,vsz,rss -p $(pgrep harmonylite)` | CPU/memory usage |
-| NATS Status | `curl http://localhost:8222/varz` | Server running, connections |
-| NATS Streams | `curl http://localhost:8222/jsz?streams=1` | Stream existence, message counts |
-| Database Size | `du -sh /var/lib/harmonylite/data.db` | Growth trends |
-| Database Integrity | `echo "PRAGMA integrity_check;" | sqlite3 /var/lib/harmonylite/data.db` | "ok" result |
-| Triggers | `echo "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '__harmonylite%';" | sqlite3 /var/lib/harmonylite/data.db` | Non-zero count |
-| Change Log Tables | `echo "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE '__harmonylite%';" | sqlite3 /var/lib/harmonylite/data.db` | Non-zero count |
-| Pending Changes | `echo "SELECT count(*) FROM __harmonylite___change_log_global;" | sqlite3 /var/lib/harmonylite/data.db` | Should be low or zero |
-| Network Connectivity | `ss -tpln | grep harmonylite` | Listening ports |
+|Issue|Diagnostic Command|What to Look For|
+|---|---|---|
+|Node Status|`systemctl status harmonylite`|Active (running) status|
+|Logs|`journalctl -u harmonylite -n 100`|Recent error messages|
+|Process Resources|`ps -o pid,%cpu,%mem,vsz,rss -p $(pgrep harmonylite)`|CPU/memory usage|
+|NATS Status|`curl http://localhost:8222/varz`|Server running, connections|
+|NATS Streams|`curl http://localhost:8222/jsz?streams=1`|Stream existence, message counts|
+|Database Size|`du -sh /var/lib/harmonylite/data.db`|Growth trends|
+|Database Integrity|`echo "PRAGMA integrity_check;" \| sqlite3 /var/lib/harmonylite/data.db`|"ok" result|
+|Triggers|`echo "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '__harmonylite%';" \| sqlite3 /var/lib/harmonylite/data.db`|Non-zero count|
+|Change Log Tables|`echo "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE '__harmonylite%';" \| sqlite3 /var/lib/harmonylite/data.db`|Non-zero count|
+|Pending Changes|`echo "SELECT count(*) FROM __harmonylite___global_change_log;" \| sqlite3 /var/lib/harmonylite/data.db`|Should be low or zero|
+|Network Connectivity|`ss -tpln \| grep harmonylite`|Listening ports|
+
 
 ## Getting More Help
 
