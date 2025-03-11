@@ -707,7 +707,7 @@ For advanced recovery when automatic procedures fail:
 | Database Integrity | `echo "PRAGMA integrity_check;" | sqlite3 /var/lib/harmonylite/data.db` | "ok" result |
 | Triggers | `echo "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '__harmonylite%';" | sqlite3 /var/lib/harmonylite/data.db` | Non-zero count |
 | Change Log Tables | `echo "SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE '__harmonylite%';" | sqlite3 /var/lib/harmonylite/data.db` | Non-zero count |
-| Pending Changes | `echo "SELECT count(*) FROM __harmonylite___global_change_log;" | sqlite3 /var/lib/harmonylite/data.db` | Should be low or zero |
+| Pending Changes | `echo "SELECT count(*) FROM __harmonylite___change_log_global;" | sqlite3 /var/lib/harmonylite/data.db` | Should be low or zero |
 | Network Connectivity | `ss -tpln | grep harmonylite` | Listening ports |
 
 ## Getting More Help
