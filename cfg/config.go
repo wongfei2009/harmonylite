@@ -119,6 +119,7 @@ var ClusterAddrFlag = flag.String("cluster-addr", "", "Cluster listening address
 var ClusterPeersFlag = flag.String("cluster-peers", "", "Comma separated list of clusters")
 var LeafServerFlag = flag.String("leaf-servers", "", "Comma separated list of leaf servers")
 var ProfServer = flag.String("pprof", "", "PProf listening address")
+var NodeIDFlag = flag.Uint64("node-id", 0, "Override node ID from config file")
 
 var DataRootDir = os.TempDir()
 var Config = &Configuration{
@@ -179,19 +180,21 @@ var Config = &Configuration{
 }
 
 func init() {
-	id, err := machineid.ID()
-	if err != nil {
-		log.Warn().Err(err).Msg("⚠️⚠️⚠️ Unable to read machine ID from OS, generating random ID ⚠️⚠️⚠️")
-		id = uuid.NewString()
-	}
+	if Config.NodeID == 0 {
+		id, err := machineid.ID()
+		if err != nil {
+			log.Warn().Err(err).Msg("⚠️⚠️⚠️ Unable to read machine ID from OS, generating random ID ⚠️⚠️⚠️")
+			id = uuid.NewString()
+		}
 
-	hasher := fnv.New64()
-	_, err = hasher.Write([]byte(id))
-	if err != nil {
-		panic(err)
-	}
+		hasher := fnv.New64()
+		_, err = hasher.Write([]byte(id))
+		if err != nil {
+			panic(err)
+		}
 
-	Config.NodeID = hasher.Sum64()
+		Config.NodeID = hasher.Sum64()
+	}
 }
 
 func Load(filePath string) error {
@@ -202,6 +205,10 @@ func Load(filePath string) error {
 
 	if err != nil {
 		return err
+	}
+
+	if *NodeIDFlag != 0 {
+		Config.NodeID = *NodeIDFlag
 	}
 
 	DataRootDir, err = filepath.Abs(path.Dir(Config.DBPath))

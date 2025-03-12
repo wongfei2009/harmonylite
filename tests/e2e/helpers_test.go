@@ -2,6 +2,7 @@ package main_test
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -21,9 +22,9 @@ func startCluster() (node1, node2, node3 *exec.Cmd) {
 	GinkgoWriter.Printf("Starting cluster setup...\n")
 
 	// Start nodes with NATS health checks
-	node1 = startNode("examples/node-1-config.toml", "127.0.0.1:4221", "nats://127.0.0.1:4222/,nats://127.0.0.1:4223/")
-	node2 = startNode("examples/node-2-config.toml", "127.0.0.1:4222", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/")
-	node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/")
+	node1 = startNode("examples/node-1-config.toml", "127.0.0.1:4221", "nats://127.0.0.1:4222/,nats://127.0.0.1:4223/", 1)
+	node2 = startNode("examples/node-2-config.toml", "127.0.0.1:4222", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/", 2)
+	node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/", 3)
 
 	GinkgoWriter.Printf("Cluster started, waiting %v for stabilization\n", nodeStartupDelay*2)
 	return node1, node2, node3
@@ -49,15 +50,19 @@ func stopNodes(nodes ...*exec.Cmd) {
 }
 
 // startNode launches a HarmonyLite node and performs a NATS health check.
-func startNode(config, addr, peers string) *exec.Cmd {
+func startNode(config, addr, peers string, nodeID uint64) *exec.Cmd {
 	defer GinkgoRecover()
-	GinkgoWriter.Printf("Starting node with config %s, addr %s, peers %s\n", config, addr, peers)
+	GinkgoWriter.Printf("Starting node with config %s, addr %s, peers %s, nodeID %d\n", config, addr, peers, nodeID)
 
 	wd, err := os.Getwd()
 	Expect(err).To(BeNil())
 	wd = wd[:len(wd)-len("/tests/e2e")]
 
-	cmd := exec.Command(filepath.Join(wd, "harmonylite"), "-config", config, "-cluster-addr", addr, "-cluster-peers", peers)
+	cmd := exec.Command(filepath.Join(wd, "harmonylite"),
+		"-config", config,
+		"-cluster-addr", addr,
+		"-cluster-peers", peers,
+		"-node-id", fmt.Sprintf("%d", nodeID))
 	cmd.Dir = wd
 	cmd.Stdout = GinkgoWriter
 	cmd.Stderr = GinkgoWriter

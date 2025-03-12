@@ -87,6 +87,7 @@ For detailed documentation, see the [docs directory](./docs).
 HarmonyLite is designed for simplicity with minimal configuration. Key command line options:
 
 - `config` - Path to TOML configuration file
+- `node-id` - Override node ID from config file
 - `cleanup` - Clean up hooks and exit
 - `save-snapshot` - Create and upload a snapshot
 - `cluster-addr` - Binding address for cluster

@@ -43,15 +43,15 @@ echo "Changed to harmonylite directory: $HARMONY_DIR"
 
 trap cleanup EXIT
 rm -rf /tmp/nats*
-./harmonylite -config examples/node-1-config.toml -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/,nats://localhost:4223/' &
+./harmonylite -config examples/node-1-config.toml -node-id 1 -cluster-addr localhost:4221 -cluster-peers 'nats://localhost:4222/,nats://localhost:4223/' &
 job1=$!
 
 sleep 1
-./harmonylite -config examples/node-2-config.toml -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/,nats://localhost:4223/' &
+./harmonylite -config examples/node-2-config.toml -node-id 2 -cluster-addr localhost:4222 -cluster-peers 'nats://localhost:4221/,nats://localhost:4223/' &
 job2=$!
 
 sleep 1
-./harmonylite -config examples/node-3-config.toml -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
+./harmonylite -config examples/node-3-config.toml -node-id 3 -cluster-addr localhost:4223 -cluster-peers 'nats://localhost:4221/,nats://localhost:4222/' &
 job3=$!
 
 wait $job1 $job2 $job3

@@ -279,6 +279,7 @@ In addition to the configuration file, HarmonyLite accepts several command-line 
 | Parameter | Description |
 |-----------|-------------|
 | `-config` | Path to configuration file |
+| `node-id` | Override node ID from config file |
 | `-cluster-addr` | Embedded NATS server cluster address |
 | `-cluster-peers` | Comma-separated list of peer URLs |
 | `-leaf-servers` | Comma-separated list of leaf servers |

@@ -122,12 +122,15 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 			// Stop node 3, save snapshot, and restart
 			stopNodes(node3)
 			time.Sleep(2 * time.Second) // Allow snapshot to be taken
-			node3Cmd := exec.Command(filepath.Join(wd, "harmonylite"), "-config", "examples/node-3-config.toml", "-save-snapshot")
+			node3Cmd := exec.Command(filepath.Join(wd, "harmonylite"),
+				"-config", "examples/node-3-config.toml",
+				"-node-id", "3",
+				"-save-snapshot")
 			node3Cmd.Dir = wd
 			node3Cmd.Stdout = GinkgoWriter
 			node3Cmd.Stderr = GinkgoWriter
 			Expect(node3Cmd.Run()).To(Succeed(), "Failed to save snapshot on node 3")
-			node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/")
+			node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/", 3)
 
 			// Verify restored data
 			Eventually(func() int {
@@ -155,7 +158,7 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 			}, maxWaitTime, pollInterval).Should(Equal(1), "Insert not replicated to node 2 during node 3 downtime")
 
 			// Restart node 3
-			node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/")
+			node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/", 3)
 			Eventually(func() int {
 				return countBooksByID(filepath.Join(dbDir, "harmonylite-3.db"), id2)
 			}, maxWaitTime*2, pollInterval).Should(Equal(1), "Node 3 failed to recover replication after restart")
@@ -231,6 +234,7 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 			// Start node 2 with the modified config
 			node2 = exec.Command(filepath.Join(wd, "harmonylite"),
 				"-config", tmpConfigPath,
+				"-node-id", "2",
 				"-cluster-addr", "127.0.0.1:4222",
 				"-cluster-peers", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/")
 			node2.Dir = wd

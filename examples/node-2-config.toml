@@ -1,6 +1,5 @@
 seq_map_path="/tmp/harmonylite-2-sm.cbor"
 db_path="/tmp/harmonylite-2.db"
-node_id=2
 
 [replication_log]
 shards=2
