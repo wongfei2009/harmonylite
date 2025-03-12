@@ -65,6 +65,12 @@ func main() {
 	log.Debug().Msg("Initializing telemetry")
 	telemetry.InitializeTelemetry()
 
+	log.Debug().Str("path", cfg.Config.DBPath).Msg("Checking if database file exists")
+	if _, err := os.Stat(cfg.Config.DBPath); os.IsNotExist(err) {
+		log.Error().Str("path", cfg.Config.DBPath).Msg("Database file does not exist. HarmonyLite is meant to replicate an existing database.")
+		return
+	}
+
 	log.Debug().Str("path", cfg.Config.DBPath).Msg("Opening database")
 	streamDB, err := db.OpenStreamDB(cfg.Config.DBPath)
 	if err != nil {
