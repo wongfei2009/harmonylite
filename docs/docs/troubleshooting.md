@@ -75,6 +75,45 @@ SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '__harmonylite%'
 SELECT COUNT(*) FROM __harmonylite___change_log_global;
 ```
 
+### Performance Profiling with pprof
+
+HarmonyLite includes Go's built-in performance profiling which can be enabled with the `-pprof` flag to diagnose performance issues:
+
+```bash
+# Start HarmonyLite with profiling enabled on port 6060
+./harmonylite -config /path/to/config.toml -pprof "127.0.0.1:6060"
+```
+
+Once enabled, you can access the following profiling endpoints:
+
+- **Overview**: `http://127.0.0.1:6060/debug/pprof/`
+- **CPU Profile**: `http://127.0.0.1:6060/debug/pprof/profile` (runs for 30 seconds by default)
+- **Heap Memory Profile**: `http://127.0.0.1:6060/debug/pprof/heap`
+- **Goroutine Stack Traces**: `http://127.0.0.1:6060/debug/pprof/goroutine`
+- **Thread Creation Profile**: `http://127.0.0.1:6060/debug/pprof/threadcreate`
+- **Blocking Profile**: `http://127.0.0.1:6060/debug/pprof/block`
+- **Execution Trace**: `http://127.0.0.1:6060/debug/pprof/trace`
+
+For more advanced analysis, use the Go pprof tool:
+
+```bash
+# CPU profiling
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile
+
+# Memory profiling
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+
+# For a 5-second CPU profile:
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=5
+```
+
+Inside the pprof interactive shell:
+- `top`: Show top functions by usage
+- `web`: Generate a graph visualization (requires Graphviz)
+- `list [function]`: Show source code with profiling data
+
+**Note**: Use profiling carefully in production environments as it exposes internal details about your application and may impact performance.
+
 ## Common Issues and Solutions
 
 ### Installation and Setup
