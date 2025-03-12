@@ -83,6 +83,61 @@ harmonylite -config config.toml
 - Additional infrastructure to manage
 - More complex initial setup
 
+## Deployment Architectures
+
+### Single Region Deployment
+
+For applications hosted in a single region, we recommend a minimum of three nodes to ensure high availability:
+
+```mermaid
+flowchart TD
+    App[Application] --> Node1
+    App --> Node2
+    
+    subgraph "NATS Cluster"
+        Node1[HarmonyLite Node 1] ---|NATS Mesh| Node2[HarmonyLite Node 2]
+        Node2 ---|NATS Mesh| Node3[HarmonyLite Node 3]
+        Node3 ---|NATS Mesh| Node1
+    end
+    
+    classDef app fill:#f9f,stroke:#333,stroke-width:2px
+    classDef node fill:#bbf,stroke:#333,stroke-width:2px
+    
+    class App app
+    class Node1,Node2,Node3 node
+```
+
+In this configuration, all nodes are part of the same NATS cluster, providing full mesh connectivity.
+
+### Multi-Region Deployment with Leaf Nodes
+
+For globally distributed applications, deploy HarmonyLite with NATS leaf nodes to efficiently manage cross-region traffic:
+
+```mermaid
+flowchart TD
+    subgraph "Region A"
+        Node1[HarmonyLite Node 1] ---|NATS Mesh| Node2[HarmonyLite Node 2]
+        Node2 ---|NATS Mesh| Node3[HarmonyLite Node 3]
+        Node3 ---|NATS Mesh| Node1
+    end
+    
+    subgraph "Region B"
+        Node4[HarmonyLite Node 4] ---|NATS Mesh| Node5[HarmonyLite Node 5]
+        Node5 ---|NATS Mesh| Node6[HarmonyLite Node 6]
+        Node6 ---|NATS Mesh| Node4
+    end
+    
+    %% Multiple Leaf Node Connections for Redundancy
+    Node1 -.->|Leaf Node Connection| Node4
+    Node2 -.->|Redundant Leaf Connection| Node5
+    
+    classDef regionA fill:#bbf,stroke:#333,stroke-width:2px
+    classDef regionB fill:#bfb,stroke:#333,stroke-width:2px
+    
+    class Node1,Node2,Node3 regionA
+    class Node4,Node5,Node6 regionB
+```
+
 ## NATS JetStream Configuration
 
 JetStream is NATS' persistence layer and is critical for HarmonyLite's replication. Here are key configuration parameters:
