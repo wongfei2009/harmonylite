@@ -41,6 +41,22 @@ bind = "0.0.0.0:3010"
 
 Access metrics at `http://<node-ip>:3010/metrics`
 
+### Health Check Endpoint
+
+HarmonyLite provides a health check HTTP endpoint that can be used for monitoring the status of nodes. Enable it in your configuration:
+
+```toml
+[health_check]
+enable = true
+bind = "0.0.0.0:8090"
+path = "/health"
+detailed = true
+```
+
+Access the health status at `http://<node-ip>:8090/health`
+
+This health check can be integrated with container orchestration systems like Docker and Kubernetes for automated monitoring and failover. See the [Health Check documentation](./health-check.md) for more details.
+
 ### Available Metrics
 
 HarmonyLite exposes the following metrics that can be used for monitoring and troubleshooting:
@@ -775,6 +791,7 @@ For advanced recovery when automatic procedures fail:
 |Node Status|`systemctl status harmonylite`|Active (running) status|
 |Logs|`journalctl -u harmonylite -n 100`|Recent error messages|
 |Process Resources|`ps -o pid,%cpu,%mem,vsz,rss -p $(pgrep harmonylite)`|CPU/memory usage|
+|Health Check|`curl http://localhost:8090/health`|"status":"healthy"|
 |NATS Status|`curl http://localhost:8222/varz`|Server running, connections|
 |NATS Streams|`curl http://localhost:8222/jsz?streams=1`|Stream existence, message counts|
 |Database Size|`du -sh /var/lib/harmonylite/data.db`|Growth trends|

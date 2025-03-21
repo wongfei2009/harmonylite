@@ -20,3 +20,9 @@ format = "console"
 [prometheus]
 enable = true
 bind = "0.0.0.0:3010"
+
+[health_check]
+enable = true  # Disabled by default
+bind = "0.0.0.0:8090"
+path = "/health"
+detailed = true

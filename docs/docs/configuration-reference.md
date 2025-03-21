@@ -197,6 +197,23 @@ namespace = "harmonylite"
 subsystem = ""
 ```
 
+## Health Check Endpoint
+
+```toml
+[health_check]
+# Enable health check endpoint (optional, default: false)
+enable = false
+
+# Health check HTTP listener address (optional, default: "0.0.0.0:8090")
+bind = "0.0.0.0:8090"
+
+# Health check endpoint path (optional, default: "/health")
+path = "/health"
+
+# Include detailed information in response (optional, default: true)
+detailed = true
+```
+
 ## Example Configurations
 
 ### Basic Single Node
@@ -248,6 +265,12 @@ reconnect_wait_seconds = 5
 enable = true
 bind = "0.0.0.0:3010"
 
+[health_check]
+enable = true
+bind = "0.0.0.0:8090"
+path = "/health"
+detailed = true
+
 [logging]
 verbose = true
 format = "json"
@@ -285,6 +308,9 @@ In addition to the configuration file, HarmonyLite accepts several command-line 
 | `-leaf-servers` | Comma-separated list of leaf servers |
 | `-cleanup` | Clean up triggers and log tables |
 | `-save-snapshot` | Force snapshot creation |
+| `-health-check` | Enable/disable health check endpoint |
+| `-health-bind` | Health check binding address |
+| `-health-path` | Health check endpoint path |
 | `-pprof` | Enable profiling server on specified address |
 | `-help` | Display help information |
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/wongfei2009/harmonylite/cfg"
 	"github.com/wongfei2009/harmonylite/db"
+	"github.com/wongfei2009/harmonylite/health"
 	"github.com/wongfei2009/harmonylite/logstream"
 	"github.com/wongfei2009/harmonylite/snapshot"
 
@@ -22,6 +23,9 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+// Version information
+var Version = "dev"
 
 func main() {
 	flag.Parse()
@@ -65,6 +69,38 @@ func main() {
 	log.Debug().Msg("Initializing telemetry")
 	telemetry.InitializeTelemetry()
 
+	// Apply health check CLI flags if provided
+	if cfg.Config.HealthCheck == nil {
+		cfg.Config.HealthCheck = health.DefaultConfig()
+	}
+	
+	// Check if flags were provided on the command line
+	healthCheckFlagProvided := false
+	healthBindFlagProvided := false
+	healthPathFlagProvided := false
+	
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "health-check" {
+			healthCheckFlagProvided = true
+		} else if f.Name == "health-bind" {
+			healthBindFlagProvided = true
+		} else if f.Name == "health-path" {
+			healthPathFlagProvided = true
+		}
+	})
+	
+	if healthCheckFlagProvided {
+		cfg.Config.HealthCheck.Enable = *cfg.HealthCheckFlag
+	}
+	
+	if healthBindFlagProvided {
+		cfg.Config.HealthCheck.Bind = *cfg.HealthBindFlag
+	}
+	
+	if healthPathFlagProvided {
+		cfg.Config.HealthCheck.Path = *cfg.HealthPathFlag
+	}
+
 	log.Debug().Str("path", cfg.Config.DBPath).Msg("Checking if database file exists")
 	if _, err := os.Stat(cfg.Config.DBPath); os.IsNotExist(err) {
 		log.Error().Str("path", cfg.Config.DBPath).Msg("Database file does not exist. HarmonyLite is meant to replicate an existing database.")
@@ -97,6 +133,25 @@ func main() {
 	replicator, err := logstream.NewReplicator(snapshot.NewNatsDBSnapshot(streamDB, snpStore))
 	if err != nil {
 		log.Panic().Err(err).Msg("Unable to initialize replicators")
+	}
+
+	// Initialize health check server
+	if cfg.Config.HealthCheck.Enable {
+		// streamDB implements health.DBChecker
+		// replicator implements health.ReplicationChecker
+		healthChecker := health.NewHealthChecker(streamDB, replicator, cfg.Config.NodeID, Version)
+		healthServer := health.NewHealthServer(cfg.Config.HealthCheck, healthChecker)
+
+		if err := healthServer.Start(); err != nil {
+			log.Warn().Err(err).Msg("Failed to start health check server")
+		}
+
+		// Make sure health server is stopped when application exits
+		defer func() {
+			if err := healthServer.Stop(); err != nil {
+				log.Warn().Err(err).Msg("Error stopping health check server")
+			}
+		}()
 	}
 
 	if *cfg.SaveSnapshotFlag {

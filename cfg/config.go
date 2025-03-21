@@ -94,6 +94,13 @@ type PrometheusConfiguration struct {
 	Subsystem string `toml:"subsystem"`
 }
 
+type HealthCheckConfiguration struct {
+	Enable   bool   `toml:"enable"`
+	Bind     string `toml:"bind"`
+	Path     string `toml:"path"`
+	Detailed bool   `toml:"detailed"`
+}
+
 type Configuration struct {
 	SeqMapPath      string `toml:"seq_map_path"`
 	DBPath          string `toml:"db_path"`
@@ -110,6 +117,7 @@ type Configuration struct {
 	NATS           NATSConfiguration           `toml:"nats"`
 	Logging        LoggingConfiguration        `toml:"logging"`
 	Prometheus     PrometheusConfiguration     `toml:"prometheus"`
+	HealthCheck    *HealthCheckConfiguration   `toml:"health_check"`
 }
 
 var ConfigPathFlag = flag.String("config", "", "Path to configuration file")
@@ -120,6 +128,9 @@ var ClusterPeersFlag = flag.String("cluster-peers", "", "Comma separated list of
 var LeafServerFlag = flag.String("leaf-servers", "", "Comma separated list of leaf servers")
 var ProfServer = flag.String("pprof", "", "PProf listening address")
 var NodeIDFlag = flag.Uint64("node-id", 0, "Override node ID from config file")
+var HealthCheckFlag = flag.Bool("health-check", false, "Enable health check endpoint")
+var HealthBindFlag = flag.String("health-bind", "0.0.0.0:8090", "Health check binding address")
+var HealthPathFlag = flag.String("health-path", "/health", "Health check endpoint path")
 
 var DataRootDir = os.TempDir()
 var Config = &Configuration{
@@ -176,6 +187,13 @@ var Config = &Configuration{
 		Enable:    false,
 		Namespace: "harmonylite",
 		Subsystem: "",
+	},
+	
+	HealthCheck: &HealthCheckConfiguration{
+		Enable:   false,  // Disabled by default
+		Bind:     "0.0.0.0:8090",
+		Path:     "/health",
+		Detailed: true,
 	},
 }
 

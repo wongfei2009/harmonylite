@@ -25,7 +25,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Operations',
-      items: ['troubleshooting', 'faq'],
+      items: ['troubleshooting', 'health-check', 'faq'],
     },
   ],
 };
