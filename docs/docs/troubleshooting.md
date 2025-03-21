@@ -41,6 +41,41 @@ bind = "0.0.0.0:3010"
 
 Access metrics at `http://<node-ip>:3010/metrics`
 
+### Available Metrics
+
+HarmonyLite exposes the following metrics that can be used for monitoring and troubleshooting:
+
+#### Database Metrics
+
+|Metric|Type|Description|
+|---|---|---|
+|`published`|Counter|Number of database change rows that have been published to the NATS stream|
+|`pending_publish`|Gauge|Number of rows that are pending to be published, which can indicate a backlog|
+|`count_changes`|Histogram|Latency (in microseconds) for counting changes in the database|
+|`scan_changes`|Histogram|Latency (in microseconds) for scanning change rows in the database|
+
+#### Performance Indicators
+
+- **High `pending_publish` values** indicate that HarmonyLite is experiencing delays in propagating changes.
+- **Increasing `count_changes` or `scan_changes` latencies** may indicate database performance issues.
+- **Low `published` rate** compared to write activity could indicate replication issues.
+
+### Understanding HarmonyLite Metrics
+
+HarmonyLite uses a change data capture (CDC) mechanism to track and replicate database changes. The metrics help monitor this process:
+
+1. **Change Detection**: When database changes occur, HarmonyLite detects them and marks them as pending in a change log table.
+    
+2. **Change Publishing**: The pending changes are published to NATS streams, and the `published` counter increases.
+    
+3. **Replication**: Other nodes consume these published changes and apply them to their local databases.
+    
+
+Monitoring these metrics provides insights into the health of this process. For example:
+
+- A consistently high `pending_publish` value could indicate network issues or that consumers are not keeping up with the change rate.
+- If `count_changes` and `scan_changes` latencies increase, it might indicate that the SQLite database is under heavy load.
+
 ### NATS Monitoring
 
 Check NATS server status:
