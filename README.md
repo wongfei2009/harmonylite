@@ -96,27 +96,6 @@ HarmonyLite is designed for simplicity with minimal configuration. Key command l
 
 See `config.toml` for detailed configuration options.
 
-## Health Check
-
-HarmonyLite provides a health check HTTP endpoint that can be used for monitoring and integration with container orchestration systems. The health check endpoint reports the status of:
-
-- Database connection
-- NATS connection
-- CDC (Change Data Capture) hooks installation
-- Tables being tracked
-
-Health check configuration is only available through the `config.toml` file:
-
-```toml
-[health_check]
-enable = false  # Disabled by default
-bind = "0.0.0.0:8090"
-path = "/health"
-detailed = true
-```
-
-See the [documentation](./docs/docs/health-check.md) for more details.
-
 ## Development
 
 ### Prerequisites
