@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/pprof"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/wongfei2009/harmonylite/telemetry"
 	"github.com/wongfei2009/harmonylite/utils"
+	"github.com/wongfei2009/harmonylite/version"
 
 	"github.com/wongfei2009/harmonylite/cfg"
 	"github.com/wongfei2009/harmonylite/db"
@@ -24,11 +26,14 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Version information
-var Version = "dev"
-
 func main() {
+	versionFlag := flag.Bool("version", false, "Display version information")
 	flag.Parse()
+	
+	if *versionFlag {
+		fmt.Println(version.Get().String())
+		return
+	}
 	err := cfg.Load(*cfg.ConfigPathFlag)
 	if err != nil {
 		panic(err)
@@ -112,7 +117,7 @@ func main() {
 	if cfg.Config.HealthCheck.Enable {
 		// streamDB implements health.DBChecker
 		// replicator implements health.ReplicationChecker
-		healthChecker := health.NewHealthChecker(streamDB, replicator, cfg.Config.NodeID, Version)
+		healthChecker := health.NewHealthChecker(streamDB, replicator, cfg.Config.NodeID, version.Get().Version)
 		healthServer := health.NewHealthServer(cfg.Config.HealthCheck, healthChecker)
 
 		if err := healthServer.Start(); err != nil {

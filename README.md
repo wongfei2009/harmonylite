@@ -93,8 +93,28 @@ HarmonyLite is designed for simplicity with minimal configuration. Key command l
 - `cluster-addr` - Binding address for cluster
 - `cluster-peers` - Comma-separated list of NATS peers
 - `leaf-server` - Leaf node connection list
+- `version` - Display version information
 
 See `config.toml` for detailed configuration options.
+
+## Version Information
+
+HarmonyLite includes a comprehensive versioning system that provides detailed information about the build:
+
+```bash
+# Display version information
+./harmonylite -version
+```
+
+The version information includes:
+- Semantic version (based on Git tags)
+- Git commit hash
+- Git tag (if available)
+- Build date and time
+- Go version used for building
+- Platform information
+
+This helps with troubleshooting and ensures you're using the expected version in your deployment.
 
 ## Development
 
@@ -106,9 +126,15 @@ See `config.toml` for detailed configuration options.
 ### Building from Source
 
 ```bash
+# Using go build directly
 export CGO_ENABLED=1 CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness"
 go build
+
+# Using the Makefile (recommended)
+make build
 ```
+
+The Makefile automatically injects version information from Git during the build process.
 
 ### Running Tests
 

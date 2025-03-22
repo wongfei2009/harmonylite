@@ -1,9 +1,19 @@
 #!/bin/sh
 
-# docker run --rm -v "$PWD":/usr/src/myapp -w /usr/src/myapp -e CGO_ENABLED=1 -e GOARCH=amd64 golang:1.18 go build -v -o build/harmonylite-linux-amd64 harmonylite.go
+# Get version information from Git
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+GIT_TAG=$(git describe --tags --exact-match 2>/dev/null || echo "none")
+BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+GO_VERSION=$(go version | awk '{print $3}')
+PLATFORM="linux-amd64"
 
-CC=x86_64-linux-musl-gcc \
-CXX=x86_64-linux-musl-g++ \
-GOARCH=amd64 GOOS=linux CGO_ENABLED=1 \
-go build -ldflags "-linkmode external -extldflags -static" -o dist/linux/amd64/harmonylite
+# Build using Makefile
+make build-linux-amd64 VERSION=$VERSION
+
+# Create dist directory if it doesn't exist
+mkdir -p dist/linux/amd64
+
+# Copy the built binary to the dist directory
+mv harmonylite dist/linux/amd64/harmonylite
 

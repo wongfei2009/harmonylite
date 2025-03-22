@@ -71,7 +71,13 @@ jobs:
 
       - name: Build harmonylite
         run: |
-          CGO_ENABLED=1 go build -ldflags "-s -w ${{ env.LDFLAGS }}" -o harmonylite .
+          VERSION="${{ env.VERSION }}" \
+          GIT_COMMIT="${{ github.sha }}" \
+          GIT_TAG="${{ github.ref_name }}" \
+          PLATFORM="${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}" \
+          CGO_ENABLED=1 \
+          make build
+          
           tar -czvf harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz harmonylite config.toml LICENSE README.md examples/*
 
       - name: Upload binary artifact
@@ -129,7 +135,13 @@ jobs:
 
       - name: Build harmonylite
         run: |
-          CGO_ENABLED=1 go build -o harmonylite .
+          VERSION="${{ env.VERSION }}" \
+          GIT_COMMIT="${{ github.sha }}" \
+          GIT_TAG="${{ github.ref_name }}" \
+          PLATFORM="${{ env.GOOS }}-${{ env.GOARCH }}" \
+          CGO_ENABLED=1 \
+          make build
+          
           tar -czvf harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.SUFFIX }}.tar.gz harmonylite config.toml LICENSE README.md examples/*
 
       - name: Upload binary artifact
