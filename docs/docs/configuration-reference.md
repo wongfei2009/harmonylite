@@ -308,9 +308,6 @@ In addition to the configuration file, HarmonyLite accepts several command-line 
 | `-leaf-servers` | Comma-separated list of leaf servers |
 | `-cleanup` | Clean up triggers and log tables |
 | `-save-snapshot` | Force snapshot creation |
-| `-health-check` | Enable/disable health check endpoint |
-| `-health-bind` | Health check binding address |
-| `-health-path` | Health check endpoint path |
 | `-pprof` | Enable profiling server on specified address |
 | `-help` | Display help information |
 
@@ -318,3 +315,5 @@ Example usage:
 ```bash
 harmonylite -config /etc/harmonylite/config.toml -cluster-addr 127.0.0.1:4222 -cluster-peers nats://127.0.0.1:4223/
 ```
+
+> **Note**: Health check configuration is now exclusively available through the `config.toml` file and cannot be set via command-line flags.

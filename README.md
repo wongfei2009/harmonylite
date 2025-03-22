@@ -93,9 +93,6 @@ HarmonyLite is designed for simplicity with minimal configuration. Key command l
 - `cluster-addr` - Binding address for cluster
 - `cluster-peers` - Comma-separated list of NATS peers
 - `leaf-server` - Leaf node connection list
-- `health-check` - Enable/disable health check endpoint
-- `health-bind` - HTTP bind address for health check
-- `health-path` - Path for health check endpoint
 
 See `config.toml` for detailed configuration options.
 
@@ -108,7 +105,7 @@ HarmonyLite provides a health check HTTP endpoint that can be used for monitorin
 - CDC (Change Data Capture) hooks installation
 - Tables being tracked
 
-Configure it in your `config.toml`:
+Health check configuration is only available through the `config.toml` file:
 
 ```toml
 [health_check]

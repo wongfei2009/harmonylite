@@ -128,9 +128,6 @@ var ClusterPeersFlag = flag.String("cluster-peers", "", "Comma separated list of
 var LeafServerFlag = flag.String("leaf-servers", "", "Comma separated list of leaf servers")
 var ProfServer = flag.String("pprof", "", "PProf listening address")
 var NodeIDFlag = flag.Uint64("node-id", 0, "Override node ID from config file")
-var HealthCheckFlag = flag.Bool("health-check", false, "Enable health check endpoint")
-var HealthBindFlag = flag.String("health-bind", "0.0.0.0:8090", "Health check binding address")
-var HealthPathFlag = flag.String("health-path", "/health", "Health check endpoint path")
 
 var DataRootDir = os.TempDir()
 var Config = &Configuration{

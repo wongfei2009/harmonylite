@@ -29,13 +29,7 @@ path = "/health"
 detailed = true
 ```
 
-You can also configure these settings using command-line flags:
-
-```bash
---health-check        # Enable health check endpoint (boolean)
---health-bind         # HTTP bind address for health check
---health-path         # Path for health check endpoint
-```
+=======
 
 ## Usage
 

@@ -69,36 +69,9 @@ func main() {
 	log.Debug().Msg("Initializing telemetry")
 	telemetry.InitializeTelemetry()
 
-	// Apply health check CLI flags if provided
+	// Initialize default health check config if not set
 	if cfg.Config.HealthCheck == nil {
 		cfg.Config.HealthCheck = health.DefaultConfig()
-	}
-	
-	// Check if flags were provided on the command line
-	healthCheckFlagProvided := false
-	healthBindFlagProvided := false
-	healthPathFlagProvided := false
-	
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "health-check" {
-			healthCheckFlagProvided = true
-		} else if f.Name == "health-bind" {
-			healthBindFlagProvided = true
-		} else if f.Name == "health-path" {
-			healthPathFlagProvided = true
-		}
-	})
-	
-	if healthCheckFlagProvided {
-		cfg.Config.HealthCheck.Enable = *cfg.HealthCheckFlag
-	}
-	
-	if healthBindFlagProvided {
-		cfg.Config.HealthCheck.Bind = *cfg.HealthBindFlag
-	}
-	
-	if healthPathFlagProvided {
-		cfg.Config.HealthCheck.Path = *cfg.HealthPathFlag
 	}
 
 	log.Debug().Str("path", cfg.Config.DBPath).Msg("Checking if database file exists")
