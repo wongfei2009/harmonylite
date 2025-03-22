@@ -126,11 +126,6 @@ This helps with troubleshooting and ensures you're using the expected version in
 ### Building from Source
 
 ```bash
-# Using go build directly
-export CGO_ENABLED=1 CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness"
-go build
-
-# Using the Makefile (recommended)
 make build
 ```
 
@@ -138,15 +133,10 @@ The Makefile automatically injects version information from Git during the build
 
 ### Running Tests
 
-First, install the Ginkgo test framework:
-```bash
-go install github.com/onsi/ginkgo/v2/ginkgo@latest
-```
-
-Then run the tests:
+Run the tests:
 
 ```bash
-ginkgo tests/e2e
+go run github.com/onsi/ginkgo/v2/ginkgo tests/e2e
 ```
 
 ## License
