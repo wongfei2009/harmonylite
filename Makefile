@@ -20,17 +20,17 @@ LDFLAGS = -s -w \
 # Target for building the binary
 .PHONY: build
 build:
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o harmonylite .
+	CGO_ENABLED=1 CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness" go build -ldflags "$(LDFLAGS)" -o harmonylite .
 
 # Target for building statically linked binary
 .PHONY: build-static
 build-static:
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS) -extldflags '-static'" -o harmonylite .
+	CGO_ENABLED=1 CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness" go build -ldflags "$(LDFLAGS) -extldflags '-static'" -o harmonylite .
 
 # Target for building for specific platforms
 .PHONY: build-linux-amd64
 build-linux-amd64:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o harmonylite .
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CGO_CFLAGS="-Wno-typedef-redefinition -Wno-nullability-completeness" go build -ldflags "$(LDFLAGS)" -o harmonylite .
 
 # Target for running tests
 .PHONY: test
