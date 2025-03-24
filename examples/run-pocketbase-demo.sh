@@ -156,7 +156,7 @@ download_pocketbase() {
             ;;
     esac
     
-    PB_VERSION="0.20.7"  # Use the latest stable version
+    PB_VERSION="0.26.2"  # Use the latest stable version
     PB_URL="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_${OS}_${ARCH}.zip"
     PB_ZIP="$DEMO_DIR/pocketbase.zip"
     PB_BIN="$DEMO_DIR/pocketbase"
