@@ -1,4 +1,4 @@
-# HarmonyLite Architecture
+# Architecture
 
 This document explains the core architecture, components, and design principles behind HarmonyLite. Understanding these concepts will help you better implement, configure, and troubleshoot your HarmonyLite deployment.
 
