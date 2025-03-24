@@ -23,6 +23,7 @@ build/
 *.pem
 harmonylite
 dist/
+examples/harmonylite-pb-demo
 
 # NPM Stuff
 node_modules/

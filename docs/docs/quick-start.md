@@ -180,6 +180,7 @@ Open a new terminal window and start the second node:
 Congratulations! You've set up a basic HarmonyLite cluster. From here, you can:
 
 - Try our [complete demo](demo.md) with Pocketbase
+  - For a quick automated setup, use `./examples/run-pocketbase-demo.sh`
 - Learn about [architecture and concepts](architecture.md)
 - Explore [configuration options](configuration-reference.md)
 - Set up a [production deployment](production-deployment.md)
