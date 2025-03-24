@@ -315,5 +315,3 @@ Example usage:
 ```bash
 harmonylite -config /etc/harmonylite/config.toml -cluster-addr 127.0.0.1:4222 -cluster-peers nats://127.0.0.1:4223/
 ```
-
-> **Note**: Health check configuration is now exclusively available through the `config.toml` file and cannot be set via command-line flags.
