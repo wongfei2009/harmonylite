@@ -1,4 +1,4 @@
-# HarmonyLite Demo with PocketBase
+# Demo with PocketBase
 
 This guide demonstrates setting up a distributed note-taking application using HarmonyLite for SQLite replication and **PocketBase** as the backend, with preconfigured admin and schema.
 
