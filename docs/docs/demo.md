@@ -2,6 +2,13 @@
 
 This guide demonstrates setting up a distributed note-taking application using HarmonyLite for SQLite replication and **PocketBase** as the backend, with preconfigured admin and schema.
 
+> **Quick Start**: For an automated setup, you can use the `run-pocketbase-demo.sh` script in the `examples` directory:
+> ```bash
+> cd examples
+> ./run-pocketbase-demo.sh
+> ```
+> This script automates all the steps below. See the [examples README](https://github.com/wongfei2009/harmonylite/tree/master/examples) for more information.
+
 ## Overview
 
 In this demo, you'll:
@@ -201,3 +208,20 @@ You've successfully built a preconfigured, distributed note-taking application w
 - Explore [advanced configuration options](configuration-reference.md)
 - Learn about [production deployment best practices](production-deployment.md)
 - Dive into the [system architecture](architecture.md)
+
+## Automated Demo Script
+
+For those who prefer an automated setup, we provide a shell script that performs all the steps described in this guide:
+
+```bash
+cd examples
+./run-pocketbase-demo.sh
+```
+
+The script supports several options:
+- `--help`: Display usage information
+- `--keep-files`: Don't delete temporary files on exit
+- `--pb-path PATH`: Specify an existing PocketBase binary
+- `--no-download`: Don't download PocketBase if not found
+
+This makes it easy to quickly demonstrate HarmonyLite's capabilities with PocketBase without manual configuration.
