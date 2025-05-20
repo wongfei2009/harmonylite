@@ -104,7 +104,7 @@ max_entries=1024
 compress=true
 # Update existing stream if the configurations of JetStream don't match up with configurations
 # generated due to parameters above. Use this option carefully because changing shards,
-# or max_etries etc. might have undesired side-effects on existing running cluster
+# or max_entries etc. might have undesired side-effects on existing running cluster
 update_existing=false
 
 
