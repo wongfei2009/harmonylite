@@ -391,7 +391,7 @@ func (conn *SqliteStreamDB) publishChangeLog() {
 		return
 	}
 
-	if len(changes) < 0 {
+	if len(changes) == 0 {
 		return
 	}
 
