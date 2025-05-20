@@ -45,7 +45,7 @@ db_path="/tmp/harmonylite.db"
 enabled=true
 # Storage for snapshot can be "nats" | "webdav" | "s3" (default "nats")
 store="nats"
-# Interval sets perodic interval in milliseconds after which an automatic snapshot should be saved
+# Interval sets periodic interval in milliseconds after which an automatic snapshot should be saved
 # If there was a snapshot saved within interval range due to other log threshold triggers, then
 # new snapshot won't be saved (since it's within time range), a value of 0 means it's disabled.
 interval=0
