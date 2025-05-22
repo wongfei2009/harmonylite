@@ -101,6 +101,12 @@ type HealthCheckConfiguration struct {
 	Detailed bool   `toml:"detailed"`
 }
 
+type MetricsEndpointConfiguration struct {
+	Enable bool   `toml:"enable"`
+	Bind   string `toml:"bind"`
+	Path   string `toml:"path"`
+}
+
 type Configuration struct {
 	SeqMapPath      string `toml:"seq_map_path"`
 	DBPath          string `toml:"db_path"`
@@ -115,9 +121,10 @@ type Configuration struct {
 	Snapshot       SnapshotConfiguration       `toml:"snapshot"`
 	ReplicationLog ReplicationLogConfiguration `toml:"replication_log"`
 	NATS           NATSConfiguration           `toml:"nats"`
-	Logging        LoggingConfiguration        `toml:"logging"`
-	Prometheus     PrometheusConfiguration     `toml:"prometheus"`
-	HealthCheck    *HealthCheckConfiguration   `toml:"health_check"`
+	Logging         LoggingConfiguration         `toml:"logging"`
+	Prometheus      PrometheusConfiguration      `toml:"prometheus"`
+	HealthCheck     *HealthCheckConfiguration    `toml:"health_check"`
+	MetricsEndpoint MetricsEndpointConfiguration `toml:"metrics_endpoint"`
 }
 
 var ConfigPathFlag = flag.String("config", "", "Path to configuration file")
@@ -191,6 +198,12 @@ var Config = &Configuration{
 		Bind:     "0.0.0.0:8090",
 		Path:     "/health",
 		Detailed: true,
+	},
+
+	MetricsEndpoint: MetricsEndpointConfiguration{
+		Enable: false, // Disabled by default, similar to HealthCheck
+		Bind:   ":3011",
+		Path:   "/metrics",
 	},
 }
 

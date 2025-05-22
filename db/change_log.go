@@ -589,6 +589,52 @@ func replicateRow(tx *goqu.TxDatabase, event *ChangeLogEvent, pkMap map[string]a
 }
 
 func replicateUpsert(tx *goqu.TxDatabase, event *ChangeLogEvent, _ map[string]any) error {
+	// --- Conflict detection logic START ---
+	if event.tableInfo == nil {
+		// This case should ideally not happen if event is properly populated.
+		// If it can, conn.watchTablesSchema[event.TableName] would be needed,
+		// but that requires passing 'conn' or making watchTablesSchema accessible.
+		// For now, assume event.tableInfo is populated.
+		log.Warn().Str("table", event.TableName).Msg("event.tableInfo is nil in replicateUpsert, cannot check for conflicts")
+	} else {
+		pkExpression := goqu.Ex{}
+		hasPk := false
+		for _, col := range event.tableInfo {
+			if col.IsPrimaryKey {
+				val, ok := event.Row[col.Name]
+				if !ok {
+					// This would indicate an inconsistent event.Row
+					return fmt.Errorf("primary key column %s not found in event.Row for table %s", col.Name, event.TableName)
+				}
+				pkExpression[col.Name] = val
+				hasPk = true
+			}
+		}
+
+		if hasPk {
+			var exists bool
+			// SELECT EXISTS (SELECT 1 FROM tableName WHERE pkCol1 = val1 AND pkCol2 = val2)
+			selectQuery := tx.Select(goqu.L("1")).From(event.TableName).Where(pkExpression).Limit(1)
+			_, err := selectQuery.ScanVal(&exists)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) { // sql.ErrNoRows means exists is false, not an actual error here
+				log.Error().Err(err).Str("table", event.TableName).Msg("Failed to execute SELECT EXISTS query for conflict check")
+				// Depending on policy, you might want to return err or just log and proceed
+			}
+
+			if exists {
+				IncConflictsResolved(strategyLastWriteWins)
+				log.Debug().Str("table", event.TableName).Interface("pk", pkExpression).Msg("Conflict detected (last_write_wins)")
+			}
+		} else {
+			log.Warn().Str("table", event.TableName).Msg("No primary key found in tableInfo, cannot check for conflicts via SELECT EXISTS.")
+		}
+	}
+	// --- Conflict detection logic END ---
+
+	tableName := event.TableName
+	operation := OperationUpsert
+	startTime := time.Now()
+
 	columnNames := make([]string, 0, len(event.Row))
 	columnValues := make([]any, 0, len(event.Row))
 	for k, v := range event.Row {
@@ -596,28 +642,66 @@ func replicateUpsert(tx *goqu.TxDatabase, event *ChangeLogEvent, _ map[string]an
 		columnValues = append(columnValues, v)
 	}
 
+	// Ensure there are columns to insert/replace.
+	if len(columnNames) == 0 {
+		log.Warn().Str("table", tableName).Msg("replicateUpsert called with no columns in event.Row")
+		// Observe duration even for this "empty" operation attempt, though it's effectively zero for DB part
+		ObserveApplyDuration(tableName, operation, time.Since(startTime).Seconds())
+		// Not counting as a write or an error in the traditional sense, unless specific error is desired.
+		return nil 
+	}
+
 	query := fmt.Sprintf(
 		upsertQuery,
-		event.TableName,
+		tableName,
 		strings.Join(columnNames, ", "),
 		strings.Join(strings.Split(strings.Repeat("?", len(columnNames)), ""), ", "),
 	)
 
-	stmt, err := tx.Prepare(query)
-	if err != nil {
-		return err
+	stmt, errP := tx.Prepare(query)
+	if errP != nil {
+		// This is a preparation error, not a direct execution error.
+		// Still, it's an error in the apply process.
+		duration := time.Since(startTime).Seconds()
+		ObserveApplyDuration(tableName, operation, duration)
+		IncApplyErrors(tableName, operation)
+		return errP
+	}
+	defer stmt.Close()
+
+	_, errE := stmt.Exec(columnValues...)
+
+	duration := time.Since(startTime).Seconds()
+	ObserveApplyDuration(tableName, operation, duration)
+
+	if errE != nil {
+		IncApplyErrors(tableName, operation)
+		return errE
 	}
 
-	_, err = stmt.Exec(columnValues...)
-	return err
+	IncReplicatedWrites(tableName, operation)
+	return nil
 }
 
 func replicateDelete(tx *goqu.TxDatabase, event *ChangeLogEvent, pkMap map[string]any) error {
-	_, err := tx.Delete(event.TableName).
+	tableName := event.TableName
+	operation := OperationDelete
+	startTime := time.Now()
+
+	_, err := tx.Delete(tableName).
 		Where(goqu.Ex(pkMap)).
 		Prepared(true).
 		Executor().
 		Exec()
 
-	return err
+	duration := time.Since(startTime).Seconds()
+	ObserveApplyDuration(tableName, operation, duration)
+
+	if err != nil {
+		IncApplyErrors(tableName, operation)
+		return err
+	}
+
+	IncReplicatedWrites(tableName, operation)
+	return nil
 }

@@ -34,14 +34,18 @@ func NewNatsDBSnapshot(d *db.SqliteStreamDB, snapshotStorage Storage) *NatsDBSna
 }
 
 func (n *NatsDBSnapshot) SaveSnapshot() error {
+	startTime := time.Now()
 	locked := n.mutex.TryLock()
 	if !locked {
+		// Not incrementing specific phase error here as it's a pre-condition failure.
+		// Or could define a new phase like "acquire_lock". For now, no specific metric.
 		return ErrPendingSnapshot
 	}
-
 	defer n.mutex.Unlock()
+
 	tmpSnapshot, err := os.MkdirTemp(os.TempDir(), tempDirPattern)
 	if err != nil {
+		IncSnapshotError(OperationCreate, PhaseCreateTempDir)
 		return err
 	}
 	defer cleanupDir(tmpSnapshot)
@@ -49,39 +53,53 @@ func (n *NatsDBSnapshot) SaveSnapshot() error {
 	bkFilePath := path.Join(tmpSnapshot, snapshotFileName)
 	err = n.db.BackupTo(bkFilePath)
 	if err != nil {
+		IncSnapshotError(OperationCreate, PhaseCreateLocalBackup)
 		return err
 	}
 
-	return n.storage.Upload(snapshotFileName, bkFilePath)
+	err = n.storage.Upload(snapshotFileName, bkFilePath)
+	if err != nil {
+		IncSnapshotError(OperationCreate, PhaseCreateUpload)
+		return err
+	}
+
+	ObserveSnapshotCreationDuration(time.Since(startTime).Seconds())
+	IncSnapshotCreationTotal()
+	return nil
 }
 
 func (n *NatsDBSnapshot) RestoreSnapshot() error {
+	startTime := time.Now()
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 
 	tmpSnapshotPath, err := os.MkdirTemp(os.TempDir(), tempDirPattern)
 	if err != nil {
+		IncSnapshotError(OperationRestore, PhaseCreateTempDir) // Shared phase name for temp dir
 		return err
 	}
 	defer cleanupDir(tmpSnapshotPath)
 
 	bkFilePath := path.Join(tmpSnapshotPath, snapshotFileName)
 	err = n.storage.Download(bkFilePath, snapshotFileName)
-	if err == ErrNoSnapshotFound {
-		log.Warn().Err(err).Msg("System will now continue without restoring snapshot")
-		return nil
-	}
-
 	if err != nil {
+		if errors.Is(err, ErrNoSnapshotFound) {
+			log.Warn().Err(err).Msg("System will now continue without restoring snapshot")
+			return nil // Not an error for metrics, but a specific outcome.
+		}
+		IncSnapshotError(OperationRestore, PhaseRestoreDownload)
 		return err
 	}
 
 	log.Info().Str("path", bkFilePath).Msg("Downloaded snapshot, restoring...")
 	err = db.RestoreFrom(n.db.GetPath(), bkFilePath)
 	if err != nil {
+		IncSnapshotError(OperationRestore, PhaseRestoreLocalRestore)
 		return err
 	}
 
+	ObserveSnapshotRestorationDuration(time.Since(startTime).Seconds())
+	IncSnapshotRestorationTotal()
 	log.Info().Str("path", bkFilePath).Msg("Restore complete...")
 	return nil
 }
