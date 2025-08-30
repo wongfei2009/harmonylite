@@ -57,11 +57,11 @@ jobs:
       SUFFIX: "${{ matrix.static && '-static' || ''}}"
       VERSION: "${{ github.event_name == 'release' && github.event.release.name || github.sha }}"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: '^1.24.0'
+          go-version: '^1.25.0'
           check-latest: true
 
       - name: Install cross-compilers
@@ -89,7 +89,7 @@ jobs:
 
       - name: Get release
         id: release
-        uses: bruceadams/get-release@v1.2.3
+        uses: bruceadams/get-release@v1.3.2
         if: github.event_name == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -104,7 +104,7 @@ jobs:
           asset_path: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz
           asset_name: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz
           asset_content_type: application/gzip
-          
+
   mac-build:
     needs: tests
     # Skip build job on pull requests if they come from forks
@@ -126,11 +126,11 @@ jobs:
       SUFFIX: "${{ matrix.static && '-static' || ''}}"
       VERSION: "${{ github.event_name == 'release' && github.event.release.name || github.sha }}"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: '^1.24.0'
+          go-version: '^1.25.0'
           check-latest: true
 
       - name: Build harmonylite
