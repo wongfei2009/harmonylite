@@ -133,10 +133,30 @@ The Makefile automatically injects version information from Git during the build
 
 ### Running Tests
 
-Run the tests:
+Run all tests:
+
+```bash
+go test ./...
+```
+
+Run end-to-end tests only:
 
 ```bash
 go run github.com/onsi/ginkgo/v2/ginkgo tests/e2e
+```
+
+#### macOS CGO Troubleshooting
+
+On some macOS versions, you may encounter CGO compilation errors related to nullability type specifiers when building or testing. If you see errors like:
+
+```
+error: pointer is missing a nullability type specifier (_Nonnull, _Nullable, or _Null_unspecified)
+```
+
+Run tests with the following workaround:
+
+```bash
+CGO_CFLAGS="-O2 -g -Wno-nullability-completeness" go test ./...
 ```
 
 ## License
