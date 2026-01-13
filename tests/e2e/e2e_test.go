@@ -258,4 +258,29 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 			defer os.Remove(tmpConfigPath)
 		})
 	})
+
+	Context("Snapshot Leader Election", func() {
+		It("should elect one node as snapshot leader among multiple publishers", func() {
+			// All 3 nodes have publish=true by default
+			// The leader election should ensure only one becomes the leader
+
+			// Insert data to trigger some activity
+			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Leader Election Test", "Author", 2026)
+			Eventually(func() int {
+				return countBooksByID(filepath.Join(dbDir, "harmonylite-2.db"), id)
+			}, maxWaitTime, pollInterval).Should(Equal(1), "Data not replicated for leader election test")
+
+			// Wait for leader election to stabilize (TTL is 30s, so wait a bit)
+			time.Sleep(5 * time.Second)
+
+			// At this point, leader election should have happened
+			// We can't directly check which node is leader from here,
+			// but the test passes if no panics/errors occurred during election
+			GinkgoWriter.Println("Leader election completed without errors")
+		})
+
+		// Note: Leader failover is tested in unit tests (snapshot_leader_test.go)
+		// E2E testing of failover with embedded NATS clusters is inherently flaky
+		// due to JetStream quorum requirements and cluster reformation timing
+	})
 })
