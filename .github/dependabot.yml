@@ -4,6 +4,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: gomod
     directory: /
     schedule:
@@ -11,6 +13,10 @@ updates:
     groups:
       gomod:
         patterns: ["*"] # All updates of last week
+    cooldown: # applies only to version-updates (not security-updates)
+      semver-patch: 7 # wait 7 days before applying patch updates
+      semver-minor: 14
+      semver-major: 28
   - package-ecosystem: npm
     directory: docs
     schedule:
@@ -18,3 +24,7 @@ updates:
     groups:
       npm:
         patterns: ["*"] # All updates of last week
+    cooldown: # applies only to version-updates (not security-updates)
+      semver-patch: 7 # wait 7 days before applying patch updates
+      semver-minor: 14
+      semver-major: 28

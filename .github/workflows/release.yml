@@ -57,9 +57,9 @@ jobs:
       SUFFIX: "${{ matrix.static && '-static' || ''}}"
       VERSION: "${{ github.event_name == 'release' && github.event.release.name || github.sha }}"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
           go-version: '^1.25.0'
           check-latest: true
@@ -81,7 +81,7 @@ jobs:
           tar -czvf harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz harmonylite config.toml LICENSE README.md examples/*
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz
           path: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.GOARM }}${{ env.SUFFIX }}.tar.gz
@@ -89,13 +89,13 @@ jobs:
 
       - name: Get release
         id: release
-        uses: bruceadams/get-release@v1.3.2
+        uses: bruceadams/get-release@74c3d60f5a28f358ccf241a00c9021ea16f0569f # v1.3.2
         if: github.event_name == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Upload release tarball
-        uses: actions/upload-release-asset@v1.0.2
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
         if: github.event_name == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -126,9 +126,9 @@ jobs:
       SUFFIX: "${{ matrix.static && '-static' || ''}}"
       VERSION: "${{ github.event_name == 'release' && github.event.release.name || github.sha }}"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
           go-version: '^1.25.0'
           check-latest: true
@@ -145,7 +145,7 @@ jobs:
           tar -czvf harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.SUFFIX }}.tar.gz harmonylite config.toml LICENSE README.md examples/*
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.SUFFIX }}.tar.gz
           path: harmonylite-${{ env.VERSION }}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.SUFFIX }}.tar.gz
@@ -153,13 +153,13 @@ jobs:
 
       - name: Get release
         id: release
-        uses: bruceadams/get-release@v1.3.2
+        uses: bruceadams/get-release@74c3d60f5a28f358ccf241a00c9021ea16f0569f # v1.3.2
         if: github.event_name == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Upload release tarball
-        uses: actions/upload-release-asset@v1.0.2
+        uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1.0.2
         if: github.event_name == 'release'
         env:
           GITHUB_TOKEN: ${{ github.token }}
