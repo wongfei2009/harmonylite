@@ -56,17 +56,41 @@ func NewReplicator(
 		}
 
 		streamCfg := makeShardStreamConfig(shard, shards, compress)
-		info, err := js.StreamInfo(streamName(shard, compress), nats.MaxWait(10*time.Second))
-		if err == nats.ErrStreamNotFound {
-			log.Debug().Uint64("shard", shard).Msg("Creating stream")
-			info, err = js.AddStream(streamCfg)
+
+		// Retry logic for getting stream info in clustered environments
+		// where JetStream may need time to synchronize after node restarts
+		var info *nats.StreamInfo
+		maxRetries := 5
+		retryDelay := 2 * time.Second
+
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			info, err = js.StreamInfo(streamName(shard, compress), nats.MaxWait(10*time.Second))
+			if err == nats.ErrStreamNotFound {
+				log.Debug().Uint64("shard", shard).Msg("Creating stream")
+				info, err = js.AddStream(streamCfg)
+			}
+
+			if err == nil {
+				break
+			}
+
+			// Log retry attempt for non-fatal errors (timeout, temporary unavailability)
+			if attempt < maxRetries-1 {
+				log.Warn().
+					Err(err).
+					Str("name", streamName(shard, compress)).
+					Int("attempt", attempt+1).
+					Int("maxRetries", maxRetries).
+					Msg("Failed to get stream info, retrying...")
+				time.Sleep(retryDelay)
+			}
 		}
 
 		if err != nil {
 			log.Error().
 				Err(err).
 				Str("name", streamName(shard, compress)).
-				Msg("Unable to get stream info...")
+				Msg("Unable to get stream info after retries...")
 			return nil, err
 		}
 

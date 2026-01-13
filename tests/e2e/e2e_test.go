@@ -245,8 +245,9 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 			// Wait for NATS to be healthy before proceeding
 			waitForNATSHealth("127.0.0.1:4222")
 
-			// Give HarmonyLite time to initialize its replicators after NATS is healthy
-			time.Sleep(5 * time.Second)
+			// Give HarmonyLite additional time to complete initialization with JetStream
+			// The retry logic in NewReplicator handles transient JetStream unavailability
+			time.Sleep(2 * time.Second)
 
 			// Insert on node 2 (should not replicate)
 			id := insertBook(filepath.Join(dbDir, "harmonylite-2.db"), "No Publish Test", "Author", 2020)
@@ -263,18 +264,16 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 			// Clean up temp config file
 			os.Remove(tmpConfigPath)
 
-			// Note: We intentionally leave node 2 in publish=false state here.
-			// Restarting node 2 with original config causes JetStream sync issues
-			// in CI environments. The subsequent Snapshot Leader Election test
-			// still works because it only tests data replication, which works
-			// regardless of the publish setting.
+			// Restart node 2 with original config for subsequent tests
+			// The retry logic in NewReplicator handles JetStream sync delays
+			stopNodes(node2)
+			node2 = startNode("examples/node-2-config.toml", "127.0.0.1:4222", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/", 2)
 		})
 	})
 
 	Context("Snapshot Leader Election", func() {
 		It("should elect one node as snapshot leader among multiple publishers", func() {
-			// Node 2 may have publish=false from the previous test (Configuration Variations)
-			// Leader election still works with the remaining publish=true nodes (1 and 3)
+			// All nodes should have publish=true at this point
 
 			// Insert data to trigger some activity
 			id := insertBook(filepath.Join(dbDir, "harmonylite-1.db"), "Leader Election Test", "Author", 2026)
