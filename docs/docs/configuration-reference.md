@@ -6,6 +6,10 @@ This document provides a comprehensive reference for all HarmonyLite configurati
 
 HarmonyLite uses a TOML configuration file format. By default, it looks for `config.toml` in the current directory, but you can specify a different path with the `-config` command-line parameter.
 
+:::warning Environment Variables
+**Environment Variables**: HarmonyLite configuration is strictly controlled via the TOML file and command-line flags. Environment variables (e.g., `HARMONYLITE_DB_PATH`) are **not** supported and will be ignored.
+:::
+
 ## Basic Configuration
 
 ```toml
@@ -51,7 +55,7 @@ max_entries = 1024
 # Number of stream replicas for fault tolerance (optional, default: 1)
 replicas = 3
 
-# Enable zstd compression for change logs (optional, default: false)
+# Enable zstd compression for change logs (optional, default: true)
 compress = true
 
 # Update existing stream if configurations don't match (optional, default: false)
@@ -62,7 +66,7 @@ update_existing = false
 
 ```toml
 [snapshot]
-# Enable snapshot support (optional, default: false)
+# Enable snapshot support (optional, default: true)
 enabled = true
 
 # Snapshot storage backend (required if enabled)
@@ -93,8 +97,8 @@ subject_prefix = "harmonylite-change-log"
 # Prefix for JetStream streams (optional, default: "harmonylite-changes")
 stream_prefix = "harmonylite-changes"
 
-# Bind address for embedded NATS server (optional, default: "0.0.0.0:4222")
-bind_address = "0.0.0.0:4222"
+# Bind address for embedded NATS server (optional, default: ":-1" which means random port)
+bind_address = ":-1"
 
 # Path to custom NATS server config file (optional)
 server_config = "/path/to/nats-server.conf"
@@ -219,85 +223,122 @@ path = "/health"
 detailed = true
 ```
 
-## Example Configurations
+## Performance Tuning Configuration
 
-### Basic Single Node
+Optimizing HarmonyLite depends on your specific workload and resource availability. Here are key parameters to tune:
+
+### Throughput vs. Latency
+- **`scan_max_changes`**: Controls batch size for processing changes.
+    - **Increase (e.g., 2048)**: Higher throughput, better for bulk updates, but may increase memory usage per batch.
+    - **Decrease (e.g., 100)**: Lower latency per batch, "smoother" processing for real-time needs, but lower overall throughput.
+
+### Resource Usage
+- **`cleanup_interval`**: Frequency of cleaning up old log entries.
+    - **Increase (e.g., 60000)**: Reduces CPU overhead from frequent deletions, but uses more disk space for temporary logs.
+    - **Decrease (e.g., 1000)**: Keeps disk usage minimal, but burns more CPU cycles.
+
+### Consistency & Safety
+- **`leader_ttl`**: Time-to-live for snapshot leader lease.
+    - **Default (30s)**: Balanced for stable networks.
+    - **Increase**: Use in high-latency or unstable networks to prevent "flapping" leadership.
+    - **Decrease**: Faster failover if a leader crashes, but higher risk of split-brain in poor networks.
+- **`replicas` (Replication Log & Snapshot)**:
+    - **Production**: Always set `replicas >= 3` for fault tolerance.
+    - **Development**: `replicas = 1` saves storage and overhead.
+
+## Common Scenarios
+
+### 1. Local Development (Minimal)
+Optimized for low overhead and quick setup. Disables heavy durability features.
 
 ```toml
-db_path = "/path/to/data.db"
+# Use temporary paths
+db_path = "/tmp/harmonylite-dev.db"
 node_id = 1
-seq_map_path = "/path/to/seq-map.cbor"
+seq_map_path = "/tmp/harmonylite-dev-seq.cbor"
 
+# No compression needed locally
 [replication_log]
 shards = 1
-max_entries = 1024
+max_entries = 128
 replicas = 1
+compress = false 
+
+# Use embedded NATS with default random port
+[nats]
+bind_address = ":-1" 
+
+# Disable snapshots for quick iteration
+[snapshot]
+enabled = false
 ```
 
-### Production Cluster
+### 2. High Performance (Throughput Optimized)
+Tuned for systems with high write volume.
 
 ```toml
-db_path = "/var/lib/harmonylite/data.db"
-node_id = 1
-seq_map_path = "/var/lib/harmonylite/seq-map.cbor"
-cleanup_interval = 30000
+# Larger batch sizes and cleanup intervals
+scan_max_changes = 2048
+cleanup_interval = 60000
 
 [replication_log]
+# Increase shards to parallelize processing
 shards = 4
-max_entries = 2048
-replicas = 3
+max_entries = 4096
+# Enable compression to save network bandwidth
 compress = true
+```
 
-[snapshot]
-enabled = true
-store = "s3"
-interval = 3600000
+### 3. High Availability (Production)
+Focuses on fault tolerance and data safety.
 
-[snapshot.s3]
-endpoint = "s3.amazonaws.com"
-path = "harmonylite/snapshots"
-bucket = "your-backup-bucket"
-use_ssl = true
-access_key = "your-access-key"
-secret = "your-secret-key"
-
+```toml
+# connect to external NATS cluster
 [nats]
-urls = ["nats://nats-server-1:4222", "nats://nats-server-2:4222"]
+urls = ["nats://nats-1:4222", "nats://nats-2:4222", "nats://nats-3:4222"]
 connect_retries = 10
 reconnect_wait_seconds = 5
 
+# Ensure redundancy
+[replication_log]
+replicas = 3
+update_existing = true
+
+# Robust snapshotting with object storage
+[snapshot]
+enabled = true
+store = "s3"
+interval = 3600000 # 1 hour
+leader_ttl = 30000
+
+[snapshot.s3]
+endpoint = "s3.us-east-1.amazonaws.com"
+bucket = "prod-backups"
+# ... credentials ...
+
+# Monitoring is critical for HA
 [prometheus]
 enable = true
 bind = "0.0.0.0:3010"
 
 [health_check]
 enable = true
-bind = "0.0.0.0:8090"
-path = "/health"
 detailed = true
-
-[logging]
-verbose = true
-format = "json"
 ```
 
-### Edge Node (Read-Only)
+### 4. Edge/Replica Node (Read-Only)
+A node that receives data but never writes back to the cluster.
 
 ```toml
-db_path = "/var/lib/harmonylite/data.db"
-node_id = 5
-seq_map_path = "/var/lib/harmonylite/seq-map.cbor"
-publish = false  # Don't publish changes
-replicate = true  # Only receive changes
+node_id = 50
+# Important: Disable publishing to avoid accidental writes propagating
+publish = false
+replicate = true
 
 [replication_log]
-shards = 2
-max_entries = 1024
+# Lower resource usage for read-only
+shards = 1
 replicas = 2
-
-[nats]
-urls = ["nats://central-nats:4222"]
-reconnect_wait_seconds = 10
 ```
 
 ## Command-Line Options
