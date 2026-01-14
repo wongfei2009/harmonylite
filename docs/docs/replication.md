@@ -67,9 +67,7 @@ Two types of tables track changes:
    - Contain columns for all original table fields (prefixed with `val_`)
    - Include metadata like operation type, timestamp, and state
 
-2. **Global Change Log**: Tracks the sequence of all changes
-   - Named `__harmonylite___global_change_log`
-   - References the specific change log entries
+2. **Global Change Log**: A master table (`__harmonylite___change_log_global`) tracks the sequence of operations and references specific change log entries
    - Provides a chronological record of all operations
 
 ### Schema Example

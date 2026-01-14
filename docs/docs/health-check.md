@@ -29,8 +29,6 @@ path = "/health"
 detailed = true
 ```
 
-=======
-
 ## Usage
 
 When enabled, the health check endpoint provides information about the node's status. The endpoint returns:
