@@ -24,20 +24,24 @@ The following diagram illustrates the high-level architecture:
 ```mermaid
 flowchart TB
     subgraph "Node 1"
-        DB1[SQLite DB] --> Triggers1[SQLite Triggers]
-        Triggers1 --> ChangeLog1[Change Log]
-        ChangeLog1 --> HarmonyLite1[HarmonyLite]
+        direction TB
+        DB1[("SQLite DB")] <--> Triggers1["Triggers"]
+        Triggers1 <--> ChangeLog1["Change Log Tables"]
+        ChangeLog1 <--> HarmonyLite1["HarmonyLite Core"]
+        HarmonyLite1 --- Health1["Health Check API"]
     end
 
-    subgraph "NATS JetStream"
-        Streams[(JetStream Streams)]
-        Objects[(Object Store)]
+    subgraph "NATS JetStream (External or Embedded)"
+        Streams[("JetStream Streams")]
+        Objects[("Object Store")]
     end
 
     subgraph "Node 2"
-        HarmonyLite2[HarmonyLite] --> ChangeLog2[Change Log]
-        ChangeLog2 --> Triggers2[SQLite Triggers]
-        Triggers2 --> DB2[SQLite DB]
+        direction TB
+        HarmonyLite2["HarmonyLite Core"] <--> ChangeLog2["Change Log Tables"]
+        ChangeLog2 <--> Triggers2["Triggers"]
+        Triggers2 <--> DB2[("SQLite DB")]
+        HarmonyLite2 --- Health2["Health Check API"]
     end
 
     HarmonyLite1 <--> Streams
@@ -48,10 +52,12 @@ flowchart TB
     classDef sqlite fill:#f9f,stroke:#333,stroke-width:2px
     classDef harmony fill:#bbf,stroke:#333,stroke-width:2px
     classDef nats fill:#bfb,stroke:#333,stroke-width:2px
+    classDef component fill:#eee,stroke:#333,stroke-width:1px
     
     class DB1,DB2 sqlite
-    class HarmonyLite1,HarmonyLite2 harmony
+    class HarmonyLite1,HarmonyLite2,Health1,Health2 harmony
     class Streams,Objects nats
+    class Triggers1,ChangeLog1,Triggers2,ChangeLog2 component
 ```
 
 ## Core Components
@@ -81,13 +87,13 @@ erDiagram
         string email
     }
     
-    GLOBAL_CHANGE_LOG {
+    __harmonylite__change_log_global {
         int id PK
         int change_table_id FK
         string table_name
     }
     
-    USERS_CHANGE_LOG {
+    __harmonylite__users_change_log {
         int id PK
         int val_id
         string val_name
@@ -96,9 +102,14 @@ erDiagram
         int created_at
         int state
     }
+
+    __harmonylite__sequence_map {
+        int stream_id PK
+        int sequence_number
+    }
     
-    USERS ||--o{ USERS_CHANGE_LOG : "triggers create"
-    USERS_CHANGE_LOG ||--o{ GLOBAL_CHANGE_LOG : "references"
+    USERS ||--o{ __harmonylite__users_change_log : "triggers create"
+    __harmonylite__users_change_log ||--o{ __harmonylite__change_log_global : "referenced by"
 ```
 
 ### 2. Message Distribution
@@ -132,6 +143,50 @@ HarmonyLite maintains system state through:
 - **Snapshots**: Periodic database snapshots for efficient recovery
 - **CBOR Serialization**: Efficient binary encoding for change records
 
+### 5. Component Design
+
+The internal package structure follows this design:
+
+```mermaid
+classDiagram
+    direction TB
+    class Main {
+        +main()
+        +changeListener()
+    }
+    class DB {
+        +SqliteStreamDB
+        +InstallCDC()
+        +Replicate()
+    }
+    class LogStream {
+        +Replicator
+        +Publish()
+        +Listen()
+    }
+    class Snapshot {
+        +NatsDBSnapshot
+        +SnapshotLeader
+        +SaveSnapshot()
+        +RestoreSnapshot()
+    }
+    class Health {
+        +HealthChecker
+        +HealthServer
+    }
+    
+    Main --> DB : Uses
+    Main --> LogStream : Uses
+    Main --> Snapshot : Uses
+    Main --> Health : Uses
+    
+    LogStream --> Snapshot : Manages
+    LogStream ..> DB : Reads/Writes
+    Snapshot ..> DB : Backups
+    Health ..> DB : Checks
+    Health ..> LogStream : Checks
+```
+
 ## Key Mechanisms
 
 ### Leaderless Replication
@@ -161,38 +216,55 @@ Change streams can be sharded to improve performance:
 - Enables parallel processing
 - Configurable via `replication_log.shards`
 
+```mermaid
+flowchart LR
+    Change[Change Event] --> Hash{"Hash(Table + PK)"}
+    Hash -->|Hash % N = 0| Stream0[Stream-0]
+    Hash -->|Hash % N = 1| Stream1[Stream-1]
+    Hash -->|...| StreamN[Stream-N]
+    
+    Stream0 --> Consumer0[Consumer-0]
+    Stream1 --> Consumer1[Consumer-1]
+    StreamN --> ConsumerN[Consumer-N]
+    
+    Consumer0 --> Serial[Strict Serial Processing]
+    Consumer1 --> Serial
+    ConsumerN --> Serial
+```
+
 ### Message Flow
 
 The complete message flow looks like this:
 
 ```mermaid
 sequenceDiagram
-    participant App1 as Application (Node 1)
-    participant DB1 as SQLite DB (Node 1)
-    participant HL1 as HarmonyLite (Node 1)
+    participant App1 as Application
+    participant DB1 as SQLite DB
+    participant HL1 as HarmonyLite
     participant NATS as NATS JetStream
-    participant HL2 as HarmonyLite (Node 2)
-    participant DB2 as SQLite DB (Node 2)
-    participant App2 as Application (Node 2)
+    participant HL2 as HarmonyLite Remote
+    participant DB2 as SQLite DB Remote
     
+    Note over App1, DB1: Local Write Operation
     App1->>DB1: INSERT/UPDATE/DELETE
-    DB1->>DB1: Trigger executes
-    DB1->>DB1: Record in change log
+    DB1->>DB1: Trigger captures change
+    DB1->>DB1: Write to change_log
     
-    HL1->>DB1: Poll for changes
-    DB1->>HL1: Return pending changes
-    HL1->>HL1: Calculate hash
-    HL1->>NATS: Publish to stream
-    NATS->>HL1: Acknowledge receipt
-    HL1->>DB1: Mark as published
+    Note over HL1, NATS: Replication Process
+    HL1->>DB1: Poll/Watch changes
+    DB1->>HL1: New Change Event
+    HL1->>HL1: Compute Shard Hash
+    HL1->>HL1: Compress Payload (ZSTD)
+    HL1->>NATS: Publish to Subject (Shard)
+    NATS-->>HL1: ACK
+    HL1->>DB1: Mark as Published
     
-    NATS->>HL2: Deliver change
-    HL2->>HL2: Process change
-    HL2->>DB2: Apply change
-    HL2->>NATS: Acknowledge processing
-    
-    App2->>DB2: Read updated data
-    DB2->>App2: Return data
+    Note over NATS, DB2: Remote Application
+    NATS->>HL2: Push Message
+    HL2->>HL2: Decompress
+    HL2->>DB2: Apply Change (Tx)
+    HL2->>DB2: Update Sequence Map
+    HL2-->>NATS: ACK
 ```
 
 ## Snapshot and Recovery
@@ -203,15 +275,25 @@ Snapshots provide efficient node recovery:
 
 ```mermaid
 graph TB
-    A[Monitor Sequence Numbers] --> B{Threshold Reached?}
-    B -->|Yes| C[Create Temp Directory]
-    B -->|No| A
-    C --> D["VACUUM INTO (Temp Copy)"]
-    D --> E[Remove Triggers & Logs]
-    E --> F[Optimize with VACUUM]
-    F --> G[Upload Snapshot]
-    G --> H[Update Sequence Map]
-    H --> A
+    Start([Start]) --> LeaderEx{Is Leader?}
+    LeaderEx -->|No| Wait[Wait / Follower Mode]
+    LeaderEx -->|Yes| CheckTime{Interval Passed?}
+    
+    CheckTime -->|No| Wait
+    CheckTime -->|Yes| Init[Init Snapshot]
+    
+    Init --> Backup["VACUUM INTO (Temp File)"]
+    Backup --> Sanitize[Remove Triggers & Logs]
+    Sanitize --> Compress[Compress/Optimize]
+    
+    Compress --> Upload{Upload To Storage}
+    Upload -->|NATS| ObjStore[Object Store]
+    Upload -->|S3| S3Bucket[S3 Bucket]
+    Upload -->|SFTP/WebDAV| FileStore[File Storage]
+    
+    ObjStore --> Finish([Update Sequence Map])
+    S3Bucket --> Finish
+    FileStore --> Finish
 ```
 
 ### Node Recovery
@@ -223,10 +305,19 @@ graph TB
     I[Node Startup] --> J[Check DB Integrity]
     J --> K[Load Sequence Map]
     K --> L{Too Far Behind?}
-    L -->|Yes| M[Download Snapshot]
     L -->|No| R[Normal Operation]
-    M --> N[Exclusive Lock]
-    N --> O[Replace DB Files]
+    L -->|Yes| M[Download Snapshot]
+    
+    M --> Source{Select Source}
+    Source -->|NATS| Obj[Object Store]
+    Source -->|S3| S3[S3 Bucket]
+    Source -->|SFTP/WebDAV| File[File Storage]
+    
+    Obj --> N
+    S3 --> N
+    File --> N
+    
+    N[Exclusive Lock] --> O[Replace DB Files]
     O --> P[Install Triggers]
     P --> Q[Process Recent Changes]
     Q --> R
