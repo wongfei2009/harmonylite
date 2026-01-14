@@ -102,11 +102,6 @@ erDiagram
         int created_at
         int state
     }
-
-    __harmonylite__sequence_map {
-        int stream_id PK
-        int sequence_number
-    }
     
     USERS ||--o{ __harmonylite__users_change_log : "triggers create"
     __harmonylite__users_change_log ||--o{ __harmonylite__change_log_global : "referenced by"
@@ -185,6 +180,40 @@ classDiagram
     Snapshot ..> DB : Backups
     Health ..> DB : Checks
     Health ..> LogStream : Checks
+```
+
+## Sequence Map & Idempotency
+
+The **Sequence Map** is the "brain" of HarmonyLite's reliability. It is a local file (default: `seq-map.cbor`) that maintains the state of consumption for every stream.
+
+### Why is it critical?
+
+1.  **Idempotency (Exactly-Once Processing)**: 
+    *   In distributed systems, messages may be delivered more than once.
+    *   The Sequence Map filters out duplicates by ensuring we only process `Sequence > StartSequence`.
+    *   This guarantees that a database change (like an INSERT) is never applied twice, which would corrupt data.
+
+2.  **Crash Recovery**:
+    *   If a node restarts, it reads the Sequence Map to know *exactly* where it left off.
+    *   It resumes consumption from `LastSequence + 1`.
+
+### How it works
+
+The Sequence Map is a simple Key-Value store serialized in **CBOR** (Concise Binary Object Representation) for performance and compactness.
+
+*   **Key**: Stream Name (e.g., `harmonylite-changes-1`)
+*   **Value**: Last successfully applied Sequence Number (e.g., `1042`)
+
+```mermaid
+flowchart LR
+    Msg["Incoming Message<br/>Seq: 105"] --> Check{Check Map}
+    
+    Check -->|Last Seq: 104| Process[Process Message]
+    Check -->|Last Seq: 105| Ignore["Drop (Duplicate)"]
+    
+    Process --> Apply[Apply to DB]
+    Apply --> Update["Update Map<br/>Set Seq: 105"]
+    Update --> Persist["Flush to Disk<br/>seq-map.cbor"]
 ```
 
 ## Key Mechanisms
