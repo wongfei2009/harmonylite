@@ -68,7 +68,9 @@ sudo chmod 750 /etc/harmonylite /var/lib/harmonylite /var/log/harmonylite
 
 ### Configuration File
 
-Create a production configuration file at `/etc/harmonylite/config.toml`:
+Create a production configuration file at `/etc/harmonylite/config.toml`. 
+
+Be sure to review the [Configuration Reference](configuration-reference.md) for a complete list of all available options.
 
 ```toml
 # Database settings
@@ -89,6 +91,7 @@ store = "s3"  # Or another supported backend
 interval = 3600000  # 1 hour
 
 [snapshot.s3]
+# See Configuration Reference for full S3 settings
 endpoint = "s3.amazonaws.com"
 bucket = "your-backup-bucket"
 path = "harmonylite/snapshots"
@@ -109,8 +112,6 @@ bind = "127.0.0.1:3010"  # Only bind to localhost if using a reverse proxy
 verbose = false  # Less verbose in production
 format = "json"  # Structured logging
 ```
-
-Customize configuration options for your specific environment.
 
 ### Systemd Service
 
@@ -172,63 +173,17 @@ sudo systemctl restart systemd-journald
 
 ## Security Considerations
 
-### Authentication
+Security is critical for production deployments.
 
-For NATS authentication in production:
+### Authentication and TLS
 
-```toml
-[nats]
-# Option 1: Username/Password
-user_name = "harmonylite"
-user_password = "secure-random-password"
-
-# Option 2: NKey authentication (preferred)
-seed_file = "/etc/harmonylite/nkeys/user.nkey"
-```
-
-### TLS Configuration
-
-For TLS-secured connections to NATS:
-
-```toml
-[nats]
-urls = ["tls://nats-server-1:4222"]
-seed_file = "/etc/harmonylite/nkeys/user.nkey"
-ca_file = "/etc/harmonylite/tls/ca.pem"
-cert_file = "/etc/harmonylite/tls/client-cert.pem"
-key_file = "/etc/harmonylite/tls/client-key.pem"
-```
+For configuring NATS authentication (Username/Password, NKeys) and TLS encryption, please refer to the [NATS Configuration Guide: Security](nats-configuration.md#security-configuration).
 
 ## Snapshot Configuration
 
-For robust snapshot configurations in production:
+Production environments should use a durable object storage backend for snapshots.
 
-```toml
-[snapshot]
-enabled = true
-interval = 3600000  # 1 hour
-store = "s3"  # S3, WebDAV, or SFTP recommended for production
-
-[snapshot.s3]
-endpoint = "s3.amazonaws.com"
-path = "harmonylite/snapshots"
-bucket = "your-backup-bucket"
-use_ssl = true
-access_key = "your-access-key"
-secret = "your-secret-key"
-```
-
-For SFTP or WebDAV storage:
-
-```toml
-[snapshot.sftp]
-url = "sftp://username:password@sftp-server:22/path/to/store/snapshots"
-
-# OR
-
-[snapshot.webdav]
-url = "https://webdav-server/path?dir=/snapshots&login=username&secret=password"
-```
+For detailed configuration of S3, SFTP, and WebDAV backends, please refer to the [Configuration Reference: Snapshot Settings](configuration-reference.md#snapshot-settings).
 
 ## Schema Changes
 
@@ -249,13 +204,6 @@ When making schema changes to your SQLite database:
 
 ## Performance Tuning
 
-### Replication Tuning
+Optimizing HarmonyLite depends on your specific workload and resource availability.
 
-Adjust these parameters based on your workload:
-
-```toml
-# High write throughput
-[replication_log]
-shards = 8
-max_entries = 4096
-```
+Please refer to the [Configuration Reference: Performance Tuning](configuration-reference.md#performance-tuning-configuration) for detailed advice on tuning `shards`, `scan_max_changes`, `cleanup_interval`, and other parameters.
