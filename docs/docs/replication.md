@@ -2,6 +2,14 @@
 
 This document provides a deep dive into HarmonyLite's replication process, explaining how changes propagate between nodes, how conflicts are resolved, and how to optimize the system for different workloads.
 
+:::tip TL;DR
+Changes are captured by SQLite triggers, serialized to CBOR, and published to NATS JetStream shards. Other nodes consume these changes and apply them locally. Conflicts are resolved using last-writer-wins based on timestamps. Changes to the same row are always processed in order.
+:::
+
+:::note Prerequisites
+This document assumes familiarity with the [Architecture](architecture.md) overview. Read that first if you haven't already.
+:::
+
 ## Core Principles
 
 HarmonyLite implements a **leaderless**, **eventually consistent** replication system with the following design principles:

@@ -2,6 +2,14 @@
 
 This document explains HarmonyLite's snapshot system, which is critical for efficient node recovery and synchronization. Snapshots provide a way to quickly bootstrap new nodes or resynchronize nodes that have been offline for extended periods.
 
+:::tip TL;DR
+Snapshots are periodic database backups stored in NATS, S3, WebDAV, or SFTP. When a node falls too far behind, it downloads the latest snapshot instead of replaying all historical changes. Leader election ensures only one node uploads snapshots at a time.
+:::
+
+:::note Prerequisites
+This document assumes familiarity with [Architecture](architecture.md) and [Replication](replication.md). The snapshot system builds on these concepts.
+:::
+
 ## Why Snapshots Matter
 
 In a distributed system like HarmonyLite, snapshots serve several essential purposes:
@@ -122,5 +130,143 @@ leader_ttl = 30000        # Leader lease TTL in ms (default: 30000)
 3. **New leader elected**: Another publisher node acquires the lease
 4. **Snapshot uploads resume**: The new leader continues uploading snapshots
 
-> [!TIP]
-> For production deployments with high availability requirements, set `publish=true` on multiple nodes. The leader election ensures only one uploads at a time, with automatic failover if the leader fails.
+:::tip Production Tip
+For production deployments with high availability requirements, set `publish=true` on multiple nodes. The leader election ensures only one uploads at a time, with automatic failover if the leader fails.
+:::
+
+## Storage Backend Examples
+
+HarmonyLite supports multiple storage backends for snapshots. Choose based on your infrastructure and requirements.
+
+### NATS Object Store (Default)
+
+The simplest option—uses the same NATS cluster for snapshot storage:
+
+```toml
+[snapshot]
+enabled = true
+interval = 3600000  # 1 hour
+store = "nats"
+
+[snapshot.nats]
+replicas = 2        # Number of replicas for fault tolerance
+bucket = "harmonylite-snapshots"
+```
+
+**Best for**: Development, small deployments, or when you want minimal infrastructure.
+
+### S3-Compatible Storage
+
+Works with AWS S3, MinIO, Backblaze B2, and other S3-compatible services:
+
+```toml
+[snapshot]
+enabled = true
+interval = 3600000
+store = "s3"
+
+[snapshot.s3]
+endpoint = "s3.amazonaws.com"
+bucket = "my-harmonylite-backups"
+path = "snapshots/cluster-1"
+use_ssl = true
+access_key = "AKIAIOSFODNN7EXAMPLE"
+secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+```
+
+**Best for**: Production deployments, especially in cloud environments.
+
+### WebDAV
+
+Useful for NAS devices and self-hosted file servers:
+
+```toml
+[snapshot]
+enabled = true
+interval = 3600000
+store = "webdav"
+
+[snapshot.webdav]
+url = "https://nas.example.com/webdav?dir=/harmonylite/snapshots&login=user&secret=password"
+```
+
+**Best for**: On-premises deployments with existing WebDAV infrastructure.
+
+### SFTP
+
+For secure file transfer to remote servers:
+
+```toml
+[snapshot]
+enabled = true
+interval = 3600000
+store = "sftp"
+
+[snapshot.sftp]
+url = "sftp://backup-user:password@backup.example.com:22/var/backups/harmonylite"
+```
+
+**Best for**: Secure off-site backups to remote servers.
+
+## Node Recovery Walkthrough
+
+When a node joins the cluster or comes back online after being offline, HarmonyLite automatically handles recovery.
+
+### Automatic Recovery Process
+
+```mermaid
+graph TB
+    A[Node Starts] --> B{Database Exists?}
+    B -->|No| C[Download Latest Snapshot]
+    B -->|Yes| D[Load Sequence Map]
+    D --> E{Behind by > max_entries?}
+    E -->|Yes| C
+    E -->|No| F[Subscribe to Streams]
+    C --> G[Replace Local Database]
+    G --> H[Install CDC Triggers]
+    H --> F
+    F --> I[Process Pending Changes]
+    I --> J[Normal Operation]
+```
+
+### Recovery Scenarios
+
+| Scenario | What Happens |
+|----------|--------------|
+| **New node** | Downloads snapshot, installs triggers, processes recent changes |
+| **Brief offline** | Catches up from NATS JetStream messages (fast) |
+| **Long offline** | Downloads snapshot, then catches up (efficient) |
+| **Corrupted DB** | Remove database file, restart—triggers full recovery |
+
+### Manual Recovery
+
+If automatic recovery fails, you can manually trigger it:
+
+```bash
+# 1. Stop HarmonyLite
+systemctl stop harmonylite
+
+# 2. Remove the database and sequence map
+rm /var/lib/harmonylite/data.db
+rm /var/lib/harmonylite/seq-map.cbor
+
+# 3. Restart HarmonyLite (triggers automatic recovery)
+systemctl start harmonylite
+
+# 4. Monitor logs
+journalctl -u harmonylite -f
+```
+
+### Force Snapshot Creation
+
+To manually create a snapshot (useful before maintenance):
+
+```bash
+harmonylite -config /etc/harmonylite/config.toml -save-snapshot
+```
+
+## Next Steps
+
+- [Configuration Reference](configuration-reference.md) - Complete configuration options
+- [Troubleshooting](troubleshooting.md) - Common issues and solutions
+- [Production Deployment](production-deployment.md) - Best practices for production

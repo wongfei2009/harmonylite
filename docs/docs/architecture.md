@@ -2,6 +2,14 @@
 
 This document explains the core architecture, components, and design principles behind HarmonyLite. Understanding these concepts will help you better implement, configure, and troubleshoot your HarmonyLite deployment.
 
+:::tip TL;DR
+HarmonyLite is an AP system (Availability + Partition Tolerance) that uses SQLite triggers to capture changes, NATS JetStream to distribute them, and a last-writer-wins strategy for conflict resolution. Any node can accept writes, and all nodes eventually converge to the same state.
+:::
+
+:::note Reading Guide
+This is the recommended starting point for understanding HarmonyLite. After this, read [Replication](replication.md) for details on how changes propagate, then [Snapshots](snapshots.md) for recovery mechanisms.
+:::
+
 ## Architectural Overview
 
 HarmonyLite implements a leaderless, eventually consistent replication system for SQLite databases. The architecture consists of four main components working together:
@@ -54,7 +62,7 @@ HarmonyLite uses SQLite triggers to capture all database changes:
 
 - **Triggers**: Automatically installed on all tables to detect INSERT, UPDATE, and DELETE operations
 - **Change Log Tables**: Each monitored table has a corresponding `__harmonylite__<table_name>_change_log` table
-- **Global Change Log**: A master table (`__harmonylite___global_change_log`) tracks the sequence of operations
+- **Global Change Log**: A master table (`__harmonylite___change_log_global`) tracks the sequence of operations
 
 When a change occurs:
 1. The trigger fires and captures the change details
