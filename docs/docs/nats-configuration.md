@@ -159,36 +159,51 @@ replicas = 3
 compress = true
 ```
 
-## Optimizing NATS JetStream Storage
+## Production Readiness Checklist
 
-By default, NATS JetStream writes data to temporary directories, which isn't ideal for production. Here's how to configure a dedicated storage location:
+When moving from development to production, ensure your configuration is tuned for reliability:
 
-### For Embedded NATS Server
+| Setting | Development Default | Production Recommendation | Why? |
+|---------|---------------------|---------------------------|------|
+| **Deployment** | Embedded | External Cluster | Independent scaling and management |
+| **Shards** | 1 | 4+ | improved write throughput |
+| **Replicas** | 1 | 3 | High availability and fault tolerance |
+| **Storage** | File (Automatic) | File (Automatic) | Persistence is handled automatically |
+| **Compression**| True | True | Reduces network and storage usage |
 
-1. **Create a NATS Config File**:
+## Data Persistence
 
-   ```nats
-   # nats-server.conf
-   jetstream {
-     store_dir: "/var/lib/harmonylite/jetstream"
-     max_memory_store: 52428800  # 50MB of memory
-     max_file_store: 5368709120  # 5GB of disk
-   }
-   ```
+HarmonyLite automatically handles NATS data persistence. By default, NATS data is stored in the `nats` subdirectory relative to your configured `db_path`.
 
-2. **Point HarmonyLite to This Config**:
+### Automatic Configuration (Recommended)
 
-   ```toml
-   [nats]
-   server_config = "/etc/harmonylite/nats-server.conf"
-   ```
+No special configuration is needed. Just ensure your `db_path` is on a persistent volume.
 
-3. **Ensure Directory Permissions**:
+```toml
+# config.toml
+db_path = "/data/harmonylite/harmonylite.db"
 
-   ```bash
-   sudo mkdir -p /var/lib/harmonylite/jetstream
-   sudo chown harmonylite:harmonylite /var/lib/harmonylite/jetstream
-   ```
+# NATS data will automatically be stored in:
+# /data/harmonylite/nats/
+```
+
+### Advanced Configuration (Optional)
+
+If you need to store NATS data on a separate disk or require advanced NATS tuning, you can provide a custom NATS server configuration file:
+
+```toml
+[nats]
+server_config = "/etc/harmonylite/nats-server.conf"
+```
+
+In your `nats-server.conf`:
+```nats
+jetstream {
+    store_dir: "/mnt/fast-disk/nats-jetstream"
+    max_memory_store: 1G
+    max_file_store: 100G
+}
+```
 
 ## Security Configuration
 
@@ -323,3 +338,20 @@ NATS can be integrated with Prometheus for advanced monitoring:
 1. Install Metricat following the instructions on their website
 2. Configure Metricat to connect to your NATS monitoring endpoints
 3. Use Metricat's interface to create dashboards for real-time monitoring
+
+## Common Issues & Troubleshooting
+
+### "NATS server not accepting connections"
+**Symptoms:** Logs show connection refused errors on startup.
+**Cause:** Port conflict. The default port `4222` might be in use by another service or another HarmonyLite instance.
+**Fix:** Change the bind address or port in `config.toml`, or use `-cluster-addr` to specify a different port.
+
+### "Stream not ready" or "Streams not ready, waiting..."
+**Symptoms:** Node acts sluggish on startup or logs show repeated waiting messages.
+**Cause:** NATS JetStream clustering takes time to elect a leader and restore state, especially after a full cluster restart.
+**Fix:** This is normal during startup. If it persists for >30s, check network connectivity between nodes and ensure a quorum (majority) of nodes are online.
+
+### "Maximum Reconnects Reached"
+**Symptoms:** Node panics or shuts down after losing connection to NATS.
+**Cause:** The node could not reconnect to the NATS cluster within the configured `connect_retries`.
+**Fix:** Increase `connect_retries` in `config.toml` if your environment has unstable network connectivity.
