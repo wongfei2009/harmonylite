@@ -8,7 +8,7 @@
 
 HarmonyLite is a distributed SQLite replication system with leaderless architecture and eventual consistency. It enables robust multi-directional replication between nodes using [NATS JetStream](https://nats.io/).
 
-*This project is a fork of [Marmot](https://github.com/maxpert/marmot), which appears to be no longer maintained.*
+*This project is a fork of [Marmot v1](https://github.com/maxpert/marmot). The upstream project has since evolved to v2 with a completely different architecture and is under active development. HarmonyLite continues to evolve based on the simpler v1 architecture.*
 
 ## Why HarmonyLite?
 
@@ -165,4 +165,4 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Acknowledgements
 
-This project is a fork of [Marmot](https://github.com/maxpert/marmot) by Zohaib Sibte Hassan. We are grateful for the solid foundation provided by the original project.
+This project is a fork of [Marmot v1](https://github.com/maxpert/marmot) by Zohaib Sibte Hassan. Marmot has since evolved to v2 with a MySQL wire-compatible interface and different architecture. HarmonyLite continues the v1 approach with its simpler NATS JetStream-based replication. We are grateful for the solid foundation provided by the original project.
