@@ -27,6 +27,11 @@ const sidebars: SidebarsConfig = {
       label: 'Operations',
       items: ['troubleshooting', 'health-check', 'faq'],
     },
+    {
+      type: 'category',
+      label: 'Design Proposals',
+      items: ['design/schema-versioning'],
+    },
   ],
 };
 
