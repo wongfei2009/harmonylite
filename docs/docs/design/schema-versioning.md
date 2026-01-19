@@ -32,14 +32,57 @@ HarmonyLite currently has **no schema versioning or mismatch detection**. When s
 
 1. **Detect** schema mismatches before they cause replication failures
 2. **Provide visibility** into cluster-wide schema state
-3. **Enable graceful handling** of schema differences during rolling upgrades
-4. **Support coordinated migrations** with minimal downtime
+3. **Enable graceful handling** of schema differences during rolling upgrades by queuing incompatible events
 
 ## Non-Goals
 
 - Automatic schema migration (DDL replication)
 - Distributed transactions
 - Strong consistency guarantees
+- Schema diff between nodes (users can compare hashes manually)
+- Coordinated migration protocol (users apply DDL manually per node)
+- Multiple mismatch policies (only queue/pending is supported)
+
+---
+
+## Atlas Integration
+
+This design leverages [Atlas](https://atlasgo.io/) (`ariga.io/atlas`) as a library for schema introspection and comparison. Atlas is a mature, MIT-licensed database schema management tool with excellent SQLite support.
+
+### Why Atlas?
+
+| Consideration | Decision |
+|---------------|----------|
+| **Schema Introspection** | Atlas provides battle-tested SQLite introspection via `PRAGMA table_info`, `PRAGMA index_list`, etc. with proper handling of edge cases (quoted identifiers, generated columns, partial indexes) |
+| **Deterministic Hashing** | Atlas's `migrate.HashFile` uses a well-defined cumulative SHA-256 algorithm that we can adapt |
+| **Schema Comparison** | Atlas's `Differ` interface handles SQLite-specific normalization (e.g., `INTEGER` vs `INT`) |
+| **Maintenance Burden** | Using Atlas as a library means we benefit from upstream fixes without maintaining our own introspection code |
+| **License** | MIT license is compatible with HarmonyLite's license |
+
+### What We Use from Atlas
+
+We use Atlas **as a library only**, not as a CLI or migration engine:
+
+```go
+import (
+    "ariga.io/atlas/sql/sqlite"
+    "ariga.io/atlas/sql/schema"
+)
+```
+
+| Atlas Component | Our Usage |
+|-----------------|-----------|
+| `sqlite.Driver` | Schema introspection via `InspectRealm()` |
+| `schema.Table`, `schema.Column` | Data structures for representing schema |
+| Hashing algorithm | Adapted for deterministic schema hashing |
+
+### What We Don't Use
+
+- Atlas CLI commands
+- Atlas migration engine (`migrate.Executor`)
+- Atlas HCL configuration files
+- Atlas schema registry / versioning (we implement our own via NATS KV)
+- Atlas `Differ` for schema comparison (out of scope)
 
 ---
 
@@ -71,55 +114,154 @@ CREATE TABLE IF NOT EXISTS __harmonylite__schema_version (
 
 ### 2. Schema Hash Calculation
 
-Implement deterministic schema hashing:
+Implement deterministic schema hashing using Atlas for introspection:
 
 ```go
-// db/schema_hash.go
+// db/schema_manager.go
 
-type TableSchema struct {
-    Name    string
-    Columns []ColumnSchema
+import (
+    "context"
+    "crypto/sha256"
+    "database/sql"
+    "encoding/hex"
+    "fmt"
+    "sort"
+
+    "ariga.io/atlas/sql/schema"
+    "ariga.io/atlas/sql/sqlite"
+)
+
+// SchemaManager wraps Atlas's SQLite driver for schema operations
+type SchemaManager struct {
+    driver *sqlite.Driver
+    db     *sql.DB
 }
 
-type ColumnSchema struct {
-    Name       string
-    Type       string
-    NotNull    bool
-    DefaultVal string
-    PrimaryKey bool
+// NewSchemaManager creates a new SchemaManager using the provided database connection
+func NewSchemaManager(db *sql.DB) (*SchemaManager, error) {
+    // Open Atlas driver on existing connection
+    driver, err := sqlite.Open(db)
+    if err != nil {
+        return nil, fmt.Errorf("opening atlas driver: %w", err)
+    }
+    return &SchemaManager{driver: driver, db: db}, nil
 }
 
-func (db *SqliteStreamDB) ComputeSchemaHash() (string, error) {
-    tables := db.getWatchedTables()
-    sort.Strings(tables)  // Deterministic ordering
+// InspectTables returns Atlas schema.Table objects for the specified tables
+func (sm *SchemaManager) InspectTables(ctx context.Context, tables []string) ([]*schema.Table, error) {
+    // Inspect the schema realm (all tables)
+    realm, err := sm.driver.InspectRealm(ctx, &schema.InspectRealmOption{
+        Schemas: []string{"main"},
+    })
+    if err != nil {
+        return nil, fmt.Errorf("inspecting realm: %w", err)
+    }
+
+    if len(realm.Schemas) == 0 {
+        return nil, nil
+    }
+
+    // Filter to requested tables
+    tableSet := make(map[string]bool)
+    for _, t := range tables {
+        tableSet[t] = true
+    }
+
+    var result []*schema.Table
+    for _, t := range realm.Schemas[0].Tables {
+        if tableSet[t.Name] {
+            result = append(result, t)
+        }
+    }
+    return result, nil
+}
+
+// ComputeSchemaHash computes a deterministic SHA-256 hash of the specified tables
+func (sm *SchemaManager) ComputeSchemaHash(ctx context.Context, tables []string) (string, error) {
+    inspected, err := sm.InspectTables(ctx, tables)
+    if err != nil {
+        return "", err
+    }
+
+    // Sort tables by name for determinism
+    sort.Slice(inspected, func(i, j int) bool {
+        return inspected[i].Name < inspected[j].Name
+    })
 
     h := sha256.New()
-    for _, tableName := range tables {
-        schema, err := db.getTableSchema(tableName)
-        if err != nil {
+    for _, table := range inspected {
+        if err := hashTable(h, table); err != nil {
             return "", err
         }
-        // Sort columns by name for determinism
-        sort.Slice(schema.Columns, func(i, j int) bool {
-            return schema.Columns[i].Name < schema.Columns[j].Name
-        })
-
-        // Hash: tableName|col1:type1:notnull:pk|col2:type2:notnull:pk|...
-        h.Write([]byte(tableName))
-        for _, col := range schema.Columns {
-            h.Write([]byte(fmt.Sprintf("|%s:%s:%t:%t",
-                col.Name, col.Type, col.NotNull, col.PrimaryKey)))
-        }
-        h.Write([]byte("\n"))
     }
 
     return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func (db *SqliteStreamDB) ComputeTableHash(tableName string) (string, error) {
-    // Same as above but for single table
+// ComputeTableHash computes a deterministic SHA-256 hash for a single table
+func (sm *SchemaManager) ComputeTableHash(ctx context.Context, tableName string) (string, error) {
+    inspected, err := sm.InspectTables(ctx, []string{tableName})
+    if err != nil {
+        return "", err
+    }
+    if len(inspected) == 0 {
+        return "", fmt.Errorf("table %q not found", tableName)
+    }
+
+    h := sha256.New()
+    if err := hashTable(h, inspected[0]); err != nil {
+        return "", err
+    }
+    return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// hashTable writes a deterministic representation of a table to the hasher
+func hashTable(h io.Writer, table *schema.Table) error {
+    // Sort columns by name for determinism
+    cols := make([]*schema.Column, len(table.Columns))
+    copy(cols, table.Columns)
+    sort.Slice(cols, func(i, j int) bool {
+        return cols[i].Name < cols[j].Name
+    })
+
+    // Write table name
+    h.Write([]byte(table.Name))
+
+    // Write each column: |name:type:notnull:pk
+    for _, col := range cols {
+        isPK := false
+        if table.PrimaryKey != nil {
+            for _, pkCol := range table.PrimaryKey.Parts {
+                if pkCol.C != nil && pkCol.C.Name == col.Name {
+                    isPK = true
+                    break
+                }
+            }
+        }
+
+        // Normalize type string using Atlas's type representation
+        typeStr := col.Type.Raw
+        if typeStr == "" && col.Type.Type != nil {
+            typeStr = fmt.Sprintf("%T", col.Type.Type)
+        }
+
+        h.Write([]byte(fmt.Sprintf("|%s:%s:%t:%t",
+            col.Name, typeStr, !col.Type.Null, isPK)))
+    }
+    h.Write([]byte("\n"))
+    return nil
 }
 ```
+
+**Key Design Decisions:**
+
+1. **Atlas for Introspection**: We use Atlas's `InspectRealm()` which handles SQLite edge cases (quoted identifiers, generated columns, etc.)
+
+2. **Hex-encoded SHA-256**: We use hex encoding (not base64) to match common conventions and be easier to read/compare in logs
+
+3. **Deterministic Ordering**: Tables and columns are sorted alphabetically before hashing
+
+4. **Type Normalization**: Atlas normalizes SQLite types (e.g., `INT` → `INTEGER`) ensuring consistent hashes across nodes even if DDL was written differently
 
 ### 3. Extended Replication Event Format
 
@@ -217,18 +359,14 @@ func (db *SqliteStreamDB) ValidateEventSchema(event *ChangeLogEvent) SchemaValid
 }
 ```
 
-### 5. Schema Mismatch Policies
+### 5. Schema Mismatch Handling (Queue Policy)
 
-Configurable behavior when schema mismatch is detected:
+When a schema mismatch is detected, events are queued for later replay:
 
 ```toml
 # config.toml
 
 [schema]
-# Policy when schema mismatch is detected
-# Options: "strict", "skip", "partial", "queue"
-mismatch_policy = "queue"
-
 # Include schema version in events (increases event size slightly)
 include_version_in_events = true
 
@@ -237,42 +375,26 @@ require_version_in_events = false
 
 # Log level for schema warnings
 warning_log_level = "warn"
+
+# Maximum time to wait for pending events before discarding
+pending_event_ttl = "168h"  # 7 days
+
+# Maximum pending events per table before alerting
+pending_event_alert_threshold = 1000
 ```
 
-**Policy Definitions:**
-
-| Policy | Behavior | Use Case |
-|--------|----------|----------|
-| `strict` | Reject event, stop replication, emit alert | Production with strict consistency requirements |
-| `skip` | Log warning, skip incompatible events, continue | Development/testing |
-| `partial` | Apply only columns that exist on target | Rolling upgrades with additive-only changes |
-| `queue` | Hold events in pending queue until schema matches | Rolling upgrades with coordinated migrations |
+**Behavior:** When an incoming event cannot be applied due to schema mismatch (e.g., missing column), the event is stored in a pending queue. After the user applies the DDL migration manually, they run `harmonylite schema replay` to apply the queued events.
 
 ```go
 // logstream/replicator.go
 
 func (r *Replicator) handleSchemaMismatch(event *ChangeLogEvent, result SchemaValidationResult) error {
-    switch r.config.Schema.MismatchPolicy {
-    case "strict":
-        r.emitAlert(AlertSchemaMismatch, event, result)
-        return ErrSchemaMismatchStrict
-
-    case "skip":
-        log.Warn().
-            Str("table", event.TableName).
-            Interface("errors", result.Errors).
-            Msg("Skipping event due to schema mismatch")
-        return nil  // Acknowledge and skip
-
-    case "partial":
-        return r.applyPartialEvent(event, result)
-
-    case "queue":
-        return r.queueForLaterReplay(event)
-
-    default:
-        return ErrUnknownPolicy
-    }
+    log.Warn().
+        Str("table", event.TableName).
+        Interface("errors", result.Errors).
+        Msg("Schema mismatch detected, queuing event for later replay")
+    
+    return r.db.QueuePendingEvent(event)
 }
 ```
 
@@ -422,84 +544,28 @@ func (db *SqliteStreamDB) ReplayPendingEvents(tableName string) (int, error) {
 }
 ```
 
-### 8. Schema Migration Coordination Protocol
-
-For zero-downtime coordinated migrations:
-
-```go
-// logstream/migration_coordinator.go
-
-type MigrationPhase string
-
-const (
-    PhaseAnnounce    MigrationPhase = "announce"
-    PhasePrepare     MigrationPhase = "prepare"
-    PhaseReady       MigrationPhase = "ready"
-    PhaseApply       MigrationPhase = "apply"
-    PhaseComplete    MigrationPhase = "complete"
-    PhaseRollback    MigrationPhase = "rollback"
-)
-
-type MigrationEvent struct {
-    MigrationId   string         `json:"migration_id"`
-    Phase         MigrationPhase `json:"phase"`
-    FromVersion   int64          `json:"from_version"`
-    ToVersion     int64          `json:"to_version"`
-    MigrationName string         `json:"migration_name"`
-    InitiatorNode uint64         `json:"initiator_node"`
-    Timestamp     time.Time      `json:"timestamp"`
-}
-
-type NodeMigrationAck struct {
-    NodeId      uint64         `json:"node_id"`
-    MigrationId string         `json:"migration_id"`
-    Phase       MigrationPhase `json:"phase"`
-    Success     bool           `json:"success"`
-    Error       string         `json:"error,omitempty"`
-}
-```
-
-**Coordination Flow:**
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    Schema Migration Coordination                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  1. ANNOUNCE                                                            │
-│     Initiator → All Nodes: "Migration v5→v6 pending"                   │
-│                                                                         │
-│  2. PREPARE                                                             │
-│     All Nodes: Pause new writes, drain pending change logs             │
-│     All Nodes → Initiator: "PREPARE_ACK"                               │
-│                                                                         │
-│  3. READY                                                               │
-│     Initiator: Wait for all PREPARE_ACKs (with timeout)                │
-│     Initiator → All Nodes: "READY - apply migration"                   │
-│                                                                         │
-│  4. APPLY                                                               │
-│     Each Node: Apply DDL migration locally                             │
-│     Each Node: Update schema version table                             │
-│     Each Node → Initiator: "APPLY_ACK" or "APPLY_FAIL"                 │
-│                                                                         │
-│  5. COMPLETE (if all succeed)                                           │
-│     Initiator → All Nodes: "COMPLETE - resume writes"                  │
-│     All Nodes: Resume normal operation                                  │
-│                                                                         │
-│  5. ROLLBACK (if any fail)                                              │
-│     Initiator → All Nodes: "ROLLBACK"                                  │
-│     All Nodes: Restore from pre-migration state                        │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### 9. CLI Commands
+### 8. CLI Commands
 
 Add schema management commands:
 
 ```bash
-# Check schema consistency across cluster
+# Check schema status (local node)
 harmonylite schema status
+# Output:
+# Local Schema Status
+# ===================
+# Schema Version: 5
+# Schema Hash: a1b2c3d4e5f6...
+# Tables Hash: f6e5d4c3b2a1...
+# Migrated At: 2025-01-17 10:30:00
+# HarmonyLite Version: 1.2.0
+#
+# Watched Tables:
+#   users: hash=abc123...
+#   orders: hash=def456...
+
+# Check schema status with cluster view (requires NATS connection)
+harmonylite schema status --cluster
 # Output:
 # Cluster Schema Status
 # =====================
@@ -509,24 +575,6 @@ harmonylite schema status
 # Node 1: v5 (hash: a1b2c3d4) - CURRENT
 # Node 2: v5 (hash: a1b2c3d4) - MATCH
 # Node 3: v4 (hash: e5f6g7h8) - MISMATCH
-#
-# Tables with differences:
-#   users: Node 3 missing column 'email'
-
-# Show detailed schema diff between nodes
-harmonylite schema diff --node1 1 --node2 3
-# Output:
-# Schema Diff: Node 1 vs Node 3
-# =============================
-# Table: users
-#   + email TEXT (exists on Node 1, missing on Node 3)
-
-# Initiate coordinated migration
-harmonylite schema migrate \
-    --name "add_user_email" \
-    --version 6 \
-    --ddl "ALTER TABLE users ADD COLUMN email TEXT" \
-    --timeout 60s
 
 # Check pending events
 harmonylite schema pending
@@ -536,49 +584,51 @@ harmonylite schema pending
 # users: 42 events (oldest: 2025-01-17 10:30:00)
 # orders: 0 events
 
-# Replay pending events after migration
+# Replay pending events after manual DDL migration
 harmonylite schema replay --table users
+# Output:
+# Replaying pending events for table 'users'...
+# Replayed: 42 events
+# Failed: 0 events
+# Remaining: 0 events
 ```
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Schema Tracking)
-- [ ] Add `__harmonylite__schema_version` table
-- [ ] Implement `ComputeSchemaHash()` and `ComputeTableHash()`
+### Phase 1: Foundation (Schema Tracking with Atlas)
+- [ ] Add `ariga.io/atlas` dependency to `go.mod`
+- [ ] Create `db/schema_manager.go` with `SchemaManager` type wrapping Atlas SQLite driver
+- [ ] Implement `InspectTables()`, `ComputeSchemaHash()`, `ComputeTableHash()`
+- [ ] Add `__harmonylite__schema_version` table creation in `InstallCDC()`
+- [ ] Add `GetSchemaVersion()` and `UpdateSchemaVersion()` methods to `SqliteStreamDB`
 - [ ] Update schema version on `-cleanup` command
 - [ ] Add `harmonylite schema status` CLI command (local only)
 
 ### Phase 2: Event Enhancement
 - [ ] Add `SchemaVersion` and `TableHash` fields to `ChangeLogEvent`
-- [ ] Populate fields during event creation
-- [ ] Ensure backward compatibility with old events
+- [ ] Populate fields during event creation in `consumeChangeLogs()`
+- [ ] Ensure backward compatibility with old events (CBOR `omitempty`)
+- [ ] Add schema version caching to avoid repeated computation
 
-### Phase 3: Validation Layer
-- [ ] Implement `ValidateEventSchema()`
-- [ ] Add `mismatch_policy` configuration
-- [ ] Implement `strict` and `skip` policies
-- [ ] Add schema mismatch metrics/logging
+### Phase 3: Validation and Queue
+- [ ] Create `db/schema_validator.go` with `SchemaValidator` type
+- [ ] Implement `ValidateEventSchema()` using cached schema info
+- [ ] Create `__harmonylite__pending_events` table
+- [ ] Implement `QueuePendingEvent()` in `db/pending_events.go`
+- [ ] Implement `ReplayPendingEvents()` with validation
+- [ ] Add pending event TTL and cleanup
+- [ ] Add `harmonylite schema pending` and `harmonylite schema replay` commands
+- [ ] Add schema mismatch metrics (Prometheus counters)
+- [ ] Add pending events gauge metric
 
 ### Phase 4: Cluster Visibility
-- [ ] Create NATS KV schema registry
+- [ ] Create NATS KV bucket `harmonylite-schema-registry`
+- [ ] Create `logstream/schema_registry.go` with registry client
 - [ ] Implement `PublishSchemaState()` on startup and schema change
-- [ ] Implement `CheckClusterSchemaConsistency()`
-- [ ] Add `harmonylite schema status` with cluster view
-- [ ] Add `harmonylite schema diff` command
-
-### Phase 5: Queue Policy
-- [ ] Create `__harmonylite__pending_events` table
-- [ ] Implement `QueuePendingEvent()`
-- [ ] Implement `ReplayPendingEvents()`
-- [ ] Add `harmonylite schema pending` and `harmonylite schema replay` commands
-
-### Phase 6: Coordinated Migrations
-- [ ] Implement migration coordination protocol
-- [ ] Add `harmonylite schema migrate` command
-- [ ] Implement rollback capability
-- [ ] Add migration history tracking
+- [ ] Implement `GetClusterSchemaState()` and `CheckClusterSchemaConsistency()`
+- [ ] Update `harmonylite schema status --cluster` to show cluster view
 
 ---
 
@@ -586,13 +636,6 @@ harmonylite schema replay --table users
 
 ```toml
 [schema]
-# Policy when schema mismatch is detected during replication
-# "strict"  - Reject event, stop replication, emit alert
-# "skip"    - Log warning, skip incompatible events, continue
-# "partial" - Apply only columns that exist on target
-# "queue"   - Hold events until schema matches
-mismatch_policy = "queue"
-
 # Include schema version metadata in replication events
 # Increases event size by ~50 bytes but enables version tracking
 include_version_in_events = true
@@ -621,17 +664,14 @@ pending_event_alert_threshold = 1000
 # Schema version on this node
 harmonylite_schema_version{node_id="1"} 5
 
-# Schema hash (as numeric for comparison)
-harmonylite_schema_hash{node_id="1"} 1234567890
-
 # Number of nodes with matching schema
 harmonylite_cluster_schema_consistent_nodes 2
 
 # Total nodes in cluster
 harmonylite_cluster_nodes_total 3
 
-# Events skipped due to schema mismatch
-harmonylite_schema_mismatch_events_total{table="users",policy="skip"} 42
+# Events queued due to schema mismatch
+harmonylite_schema_mismatch_events_total{table="users"} 42
 
 # Pending events waiting for schema match
 harmonylite_pending_events{table="users"} 156
@@ -675,48 +715,42 @@ Extend existing health check endpoint:
 
 ### Performing Schema Migrations
 
-**Option A: Rolling upgrade (additive changes only)**
+Schema migrations are performed manually on each node. Incompatible events are automatically queued.
+
 ```bash
-# Use "partial" policy during migration window
-# 1. Add column with default on Node 1
-# 2. Run harmonylite -cleanup on Node 1
+# 1. Apply DDL on Node 1
+sqlite3 mydb.db "ALTER TABLE users ADD COLUMN email TEXT"
+
+# 2. Restart HarmonyLite on Node 1 (or run -cleanup to update schema version)
+harmonylite -cleanup -db mydb.db
+
 # 3. Repeat for other nodes
-# Events with new column will be partially applied to old-schema nodes
+# During migration window, events from migrated nodes are queued on non-migrated nodes
+
+# 4. After all nodes are migrated, replay pending events
+harmonylite schema replay --table users
 ```
 
-**Option B: Coordinated migration (any change)**
-```bash
-# 1. Initiate coordinated migration
-harmonylite schema migrate \
-    --name "add_user_email" \
-    --version 6 \
-    --ddl "ALTER TABLE users ADD COLUMN email TEXT"
-
-# 2. System automatically:
-#    - Pauses writes
-#    - Drains pending changes
-#    - Applies DDL on all nodes
-#    - Resumes operation
-```
+**Note:** During the migration window, nodes with older schemas will queue events from nodes with newer schemas. Once all nodes have the same schema, run `harmonylite schema replay` to apply queued events.
 
 ---
 
 ## Open Questions
 
-1. **DDL Replication**: Should we support automatic DDL replication (risky) or always require explicit coordination?
+1. **Version Numbering**: Global monotonic version vs. per-table versions? (Current design uses global version)
 
-2. **Rollback Strategy**: How to handle partial migration failures? Snapshot restore vs. reverse DDL?
+2. **Event Retention**: How long to keep pending events before discarding? (Current default: 7 days)
 
-3. **Version Numbering**: Global monotonic version vs. per-table versions?
+3. **Automatic Replay**: Should pending events be automatically replayed when schema matches, or require manual `harmonylite schema replay`?
 
-4. **Event Retention**: How long to keep pending events before discarding?
-
-5. **Partial Policy Edge Cases**: What if a DELETE event references a column that doesn't exist locally?
+4. **Hash Stability**: If Atlas changes its type normalization in a future version, hashes could change. Should we pin to a specific hash algorithm version?
 
 ---
 
 ## References
 
+- [Atlas - Database Schema as Code](https://atlasgo.io/) - Schema management tool used for introspection
+- [Atlas SQLite Driver](https://github.com/ariga/atlas/tree/master/sql/sqlite) - SQLite-specific implementation
 - [SQLite Schema Introspection](https://www.sqlite.org/pragma.html#pragma_table_info)
 - [NATS KeyValue](https://docs.nats.io/nats-concepts/jetstream/key-value-store)
 - [CockroachDB Schema Changes](https://www.cockroachlabs.com/docs/stable/online-schema-changes.html) (inspiration for coordination)
