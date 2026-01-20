@@ -65,7 +65,21 @@ The consumer doesn't just blindly apply SQL. It checks the **Sequence Map**.
 
 Understanding how HarmonyLite behaves when things go wrong is essential for production confidence.
 
-### 1. Network Partition (Split Brain)
+### 1. Schema Mismatch (Rolling Upgrades)
+
+**Scenario**: Node A is upgraded with a new column (`ALTER TABLE users ADD COLUMN email TEXT`). Nodes B and C still have the old schema.
+
+**Behavior**:
+*   **Detection**: When Node A publishes changes, it includes its schema hash in the message.
+*   **Pause**: Nodes B and C detect the mismatch and pause replication (NAK with 30s delay).
+*   **Safe State**: Messages queue up in NATS JetStream. No data is lost or corrupted.
+*   **Resolution**: After upgrading schema on Nodes B and C and restarting HarmonyLite, replication resumes automatically.
+
+**Monitoring**:
+*   Check logs for `Schema mismatch detected, pausing replication` warnings.
+*   Use the NATS KV registry to view cluster-wide schema state.
+
+### 2. Network Partition (Split Brain)
 
 **Scenario**: Node A and Node B lose connectivity but both remain online and accept writes from users. User 1 updates `Row X` on Node A. User 2 updates `Row X` on Node B.
 
@@ -77,7 +91,7 @@ Understanding how HarmonyLite behaves when things go wrong is essential for prod
     *   **Last Arrival Wins**: The change that arrives at the NATS server *last* determines the final state.
     *   **Field Granularity**: Overwrites are **Row-Based**, not Field-Based. If User 1 changed `email` and User 2 changed `name`, the "loser's" entire row state is replaced by the "winner's" state.
 
-### 2. Clock Skew (The "Time Travel" Problem)
+### 3. Clock Skew (The "Time Travel" Problem)
 
 **Scenario**: Node A's system clock is set to **10:00 AM**. Node B's clock is accidentally set to **10:05 AM**.
 
@@ -85,7 +99,7 @@ Understanding how HarmonyLite behaves when things go wrong is essential for prod
 *   **No Impact on Conflict Resolution**: Since HarmonyLite uses NATS ordering (Last Arrival Wins) rather than comparing timestamps, clock skew does **not** cause data to be overwritten based on "future" timestamps.
 *   **Application Impact**: However, your *application* data might still be confusing (e.g., `created_at` columns in your user tables). It is still best practice to run NTP.
 
-### 3. NATS Outage
+### 4. NATS Outage
 
 **Scenario**: The NATS JetStream server crashes or is unreachable.
 
@@ -95,7 +109,7 @@ Understanding how HarmonyLite behaves when things go wrong is essential for prod
 *   **Recovery**: When NATS returns, the poller picks up valid `state=0` rows and flushes them.
 *   **Disk Limit**: If NATS is down for days, your SQLite file size will increase due to the unpruned change logs. Monitor your disk usage.
 
-### 4. Node Crash & Hard Recovery
+### 5. Node Crash & Hard Recovery
 
 **Scenario**: Node A crashes. It comes back online 1 hour later.
 
@@ -134,4 +148,6 @@ max_payload_mb = 4
 | **Data not syncing** | NATS Connectivity | Check `nats-box` connection. Check `change_log` state is sticking at `0`. |
 | **Data "reverting"** | Clock Skew | check `date` on all servers. |
 | **High Disk Usage** | Logs not pruning | Verify NATS ACKs are being received so rows move to `state=1` and get pruned. |
+| **"Schema mismatch" in logs** | Rolling upgrade in progress | Complete schema upgrade on all nodes, then restart HarmonyLite. |
+| **Replication paused** | Schema version mismatch | Check `harmonylite-schema-registry` KV for node schema hashes. Upgrade lagging nodes. |
 | **"Gap Detected" in logs** | Node offline too long | Default behavior is auto-snapshot restore. Increase Stream limits if this happens often. |

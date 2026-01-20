@@ -187,20 +187,49 @@ For detailed configuration of S3, SFTP, and WebDAV backends, please refer to the
 
 ## Schema Changes
 
-When making schema changes to your SQLite database:
+HarmonyLite supports **rolling schema upgrades** with automatic pause/resume behavior. When a schema mismatch is detected between nodes, replication pauses safely until schemas converge.
 
-1. Stop applications writing to the database
-2. Apply schema changes on one node
-3. Run cleanup to reset triggers:
-   ```bash
-   harmonylite -config /etc/harmonylite/config.toml -cleanup
-   ```
-4. Restart HarmonyLite on that node:
-   ```bash
-   sudo systemctl restart harmonylite
-   ```
-5. Repeat for other nodes
-6. Resume application connections
+### Rolling Upgrade Workflow
+
+You can upgrade your database schema one node at a time without stopping the entire cluster:
+
+```bash
+# 1. Stop the node
+sudo systemctl stop harmonylite
+
+# 2. Apply schema changes
+sqlite3 /var/lib/harmonylite/data.db "ALTER TABLE users ADD COLUMN email TEXT"
+
+# 3. Restart HarmonyLite (it will compute a new schema hash)
+sudo systemctl start harmonylite
+
+# 4. Repeat for remaining nodes
+```
+
+### How It Works
+
+1. **Schema Hash Tracking**: Each replication message includes a schema hash computed from the table structure
+2. **Mismatch Detection**: When a node receives a message with a different schema hash, it pauses replication
+3. **Safe Pause**: The node NAKs messages with a delay, preserving message order in NATS
+4. **Automatic Resume**: After the local schema is upgraded and HarmonyLite restarts, replication resumes automatically
+
+### Monitoring Schema State
+
+You can view the cluster-wide schema state via the NATS KV registry:
+
+```bash
+# Check if all nodes have the same schema (using nats CLI)
+nats kv ls harmonylite-schema-registry
+nats kv get harmonylite-schema-registry node-1
+```
+
+### Important Notes
+
+- **During the migration window**: Nodes with older schemas will pause replication. This is expected behavior.
+- **Order preservation**: Paused messages remain in NATS JetStream and are replayed after upgrade.
+- **Change log recreation**: After altering a table, HarmonyLite automatically recreates the CDC triggers and change_log table with the new column structure.
+
+For detailed design documentation, see [Schema Versioning Design](design/schema-versioning.md).
 
 ## Performance Tuning
 
