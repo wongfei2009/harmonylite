@@ -534,12 +534,6 @@ No additional configuration required in the initial version.
 # Schema hash on this node (for alerting on changes)
 harmonylite_schema_hash_info{node_id="1", hash="a1b2c3d4"} 1
 
-# Number of nodes with matching schema
-harmonylite_cluster_schema_consistent_nodes 2
-
-# Total nodes in cluster
-harmonylite_cluster_nodes_total 3
-
 # Events paused due to schema mismatch
 harmonylite_schema_mismatch_events_total 42
 
