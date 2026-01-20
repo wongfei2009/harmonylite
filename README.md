@@ -74,12 +74,6 @@ Unlike other SQLite replication solutions that require a leader-follower archite
 - Sleep timeout support for serverless environments
 - Comprehensive E2E testing
 
-## Project Roadmap
-
-Future plans for HarmonyLite include:
-- Improved documentation and examples
-- Enhanced observability and metrics
-
 ## Documentation
 
 For detailed documentation, see the [docs directory](./docs).
