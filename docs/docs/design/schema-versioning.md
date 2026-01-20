@@ -397,6 +397,14 @@ func (r *Replicator) handleSchemaMismatch(event *ChangeLogEvent, msg *nats.Msg) 
         // We've been paused for a while - recompute to check if DDL was applied
         r.lastRecomputeAt = now
 
+        // Check for stream gap before recomputing schema
+        if r.checkStreamGap() {
+            log.Fatal().
+                Dur("paused_for", now.Sub(r.schemaMismatchAt)).
+                Msg("Stream gap detected during schema mismatch pause, exiting for snapshot restore")
+            // Process exits here. On restart, RestoreSnapshot() will run.
+        }
+
         newHash, err := r.schemaCache.Recompute(context.Background())
         if err == nil && event.SchemaHash == newHash {
             // Schema now matches after local DDL was applied
@@ -419,6 +427,28 @@ func (r *Replicator) handleSchemaMismatch(event *ChangeLogEvent, msg *nats.Msg) 
     return nil
 }
 
+// checkStreamGap returns true if any stream has truncated messages we need
+func (r *Replicator) checkStreamGap() bool {
+    for shardID, js := range r.streamMap {
+        strName := streamName(shardID, r.compressionEnabled)
+        info, err := js.StreamInfo(strName)
+        if err != nil {
+            continue
+        }
+
+        savedSeq := r.repState.get(strName)
+        if savedSeq < info.State.FirstSeq {
+            log.Warn().
+                Str("stream", strName).
+                Uint64("saved_seq", savedSeq).
+                Uint64("first_seq", info.State.FirstSeq).
+                Msg("Stream gap detected: required messages have been truncated")
+            return true
+        }
+    }
+    return false
+}
+
 func (r *Replicator) resetMismatchState() {
     r.schemaMismatchAt = time.Time{}
     r.lastRecomputeAt = time.Time{}
@@ -431,13 +461,26 @@ func (r *Replicator) resetMismatchState() {
 |-------|--------|
 | First mismatch | Recompute hash immediately, NAK if still mismatched |
 | Subsequent NAKs within 5 min | Just NAK (no recompute) |
-| After 5 min pause | Recompute hash, check again |
+| After 5 min pause | Check for stream gap, then recompute hash |
+| Stream gap detected | Exit process for snapshot restore on restart |
 | Schema matches after recompute | Resume replication immediately |
 | Schema still mismatched | Log warning with pause duration, continue waiting |
 
 **Self-Healing After DDL:**
 
 Once DDL is applied locally (e.g., `ALTER TABLE users ADD COLUMN email TEXT`), the next recompute cycle will detect the schema change and resume replication automatically. No restart or manual intervention is required.
+
+**Stream Gap Detection:**
+
+If replication stays paused long enough for JetStream to truncate messages (due to `MaxMsgs` limit), the node will detect this during the periodic recompute check and exit:
+
+1. Every 5 minutes during pause, `checkStreamGap()` compares `savedSeq` against `stream.FirstSeq`
+2. If `savedSeq < FirstSeq`, required messages have been truncated
+3. HarmonyLite logs a fatal error and exits
+4. On restart, the existing `RestoreSnapshot()` logic downloads a snapshot and restores the database
+5. Replication resumes from the snapshot state
+
+This ensures nodes don't get stuck in an unrecoverable state during prolonged schema mismatches.
 
 **Performance During Pause:**
 
@@ -604,6 +647,8 @@ harmonylite schema status --cluster
 - [ ] Add hash comparison in replication hot path (O(1) string comparison)
 - [ ] NAK with delay when schema hash mismatches (pause replication)
 - [ ] Recompute hash on first mismatch and every 5 minutes during pause
+- [ ] Implement `checkStreamGap()` to detect truncated messages during pause
+- [ ] Exit process when stream gap detected (triggers snapshot restore on restart)
 - [ ] Auto-resume when schema matches after recompute
 - [ ] Create `__harmonylite__dead_letter_events` table
 - [ ] Implement dead-letter capture for apply failures
@@ -694,14 +739,6 @@ harmonylite -cleanup -db mydb.db
 ```
 
 **Note:** During the migration window, nodes with older schemas will pause replication and NATS will redeliver once schemas converge. Events that fail to apply (e.g., constraint violations) are moved to the dead-letter table for manual inspection.
-
----
-
-## Open Questions
-
-1. **Stream Retention**: How long can replication stay paused before JetStream truncation forces a snapshot restore?
-
-2. **Hash Stability**: If Atlas changes its type normalization in a future version, hashes could change. Should we pin to a specific hash algorithm version?
 
 ---
 
