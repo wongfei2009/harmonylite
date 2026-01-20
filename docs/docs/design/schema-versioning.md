@@ -271,8 +271,10 @@ To avoid expensive per-event validation, the schema hash is computed once and ca
 
 // SchemaCache holds the precomputed schema hash for fast validation
 type SchemaCache struct {
-    mu         sync.RWMutex
-    schemaHash string
+    mu            sync.RWMutex
+    schemaHash    string
+    schemaManager *SchemaManager
+    tables        []string
 }
 
 // Initialize computes and caches the schema hash for watched tables
@@ -285,6 +287,8 @@ func (sc *SchemaCache) Initialize(ctx context.Context, sm *SchemaManager, tables
         return fmt.Errorf("computing schema hash: %w", err)
     }
     sc.schemaHash = hash
+    sc.schemaManager = sm
+    sc.tables = tables
     return nil
 }
 
@@ -295,11 +299,18 @@ func (sc *SchemaCache) GetSchemaHash() string {
     return sc.schemaHash
 }
 
-// Invalidate clears the cache, forcing recomputation on next access
-func (sc *SchemaCache) Invalidate() {
+// Recompute recalculates the schema hash from the database
+// Called during pause state to detect if local DDL has been applied
+func (sc *SchemaCache) Recompute(ctx context.Context) (string, error) {
     sc.mu.Lock()
     defer sc.mu.Unlock()
-    sc.schemaHash = ""
+
+    hash, err := sc.schemaManager.ComputeSchemaHash(ctx, sc.tables)
+    if err != nil {
+        return "", fmt.Errorf("recomputing schema hash: %w", err)
+    }
+    sc.schemaHash = hash
+    return hash, nil
 }
 ```
 
@@ -315,16 +326,12 @@ func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent, msg *nats.Msg)
     if event.SchemaHash != "" {
         localHash := r.schemaCache.GetSchemaHash()
         if event.SchemaHash != localHash {
-            log.Warn().
-                Str("event_hash", event.SchemaHash[:8]).
-                Str("local_hash", localHash[:8]).
-                Msg("Schema mismatch, pausing replication")
-            msg.NakWithDelay(30 * time.Second)
-            return nil
+            return r.handleSchemaMismatch(event, msg)
         }
     }
 
     // Hashes match (or no hash in event) - apply directly
+    r.resetMismatchState()
     return r.db.ReplicateRow(event)
 }
 ```
@@ -333,22 +340,110 @@ func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent, msg *nats.Msg)
 
 | Operation | Cost | When |
 |-----------|------|------|
-| Hash computation | O(tables + columns) + PRAGMA calls | Once at startup, on `-cleanup`, or schema change detection |
+| Hash computation | O(tables + columns) + PRAGMA calls | On startup, or during pause recompute interval |
 | Per-event validation | O(1) string comparison | Every incoming event |
 | Cache lookup | O(1) string read with RLock | Every incoming event |
 
-**Cache Invalidation:**
+**Cache Recomputation:**
 
-The cache is invalidated and recomputed:
+The cache is computed:
 - On HarmonyLite startup
 - When running `harmonylite -cleanup`
-- When a schema change is detected (future: via SQLite update hook on `sqlite_master`)
+- Periodically during schema mismatch pause state (see Section 5)
 
-### 5. Schema Mismatch Handling (Pause Policy)
+### 5. Schema Mismatch Handling (Pause with Periodic Recompute)
 
-When a schema mismatch is detected (hash comparison fails), replication pauses for that shard by NAK-ing the message with a delay. The sequence map is not advanced, so ordering is preserved. Once the local schema is updated, NATS redelivers from the same sequence and replication resumes.
+When a schema mismatch is detected (hash comparison fails), replication pauses for that shard by NAK-ing the message with a delay. The sequence map is not advanced, so ordering is preserved.
 
-**Behavior:** When an incoming event's `SchemaHash` doesn't match the cached local hash, the consumer logs a warning, NAKs with a delay, and does not apply the event.
+**Key Behavior:** During the pause state, HarmonyLite periodically recomputes the local schema hash to detect if DDL has been applied locally. Once schemas match, replication resumes automatically without requiring a restart.
+
+```go
+// logstream/replicator.go
+
+type Replicator struct {
+    // ... existing fields
+    schemaCache        *SchemaCache
+    schemaMismatchAt   time.Time     // When mismatch first detected
+    lastRecomputeAt    time.Time     // Last time we recomputed during pause
+}
+
+const (
+    schemaNakDelay          = 30 * time.Second
+    schemaRecomputeInterval = 5 * time.Minute
+)
+
+func (r *Replicator) handleSchemaMismatch(event *ChangeLogEvent, msg *nats.Msg) error {
+    now := time.Now()
+
+    if r.schemaMismatchAt.IsZero() {
+        // First mismatch - record timestamp, recompute immediately
+        r.schemaMismatchAt = now
+        r.lastRecomputeAt = now
+
+        newHash, err := r.schemaCache.Recompute(context.Background())
+        if err == nil && event.SchemaHash == newHash {
+            // Schema matches after recompute (e.g., DDL applied before startup)
+            log.Info().Msg("Schema matches after initial recompute, applying event")
+            r.resetMismatchState()
+            return r.db.ReplicateRow(event)
+        }
+
+        log.Warn().
+            Str("event_hash", event.SchemaHash[:8]).
+            Str("local_hash", newHash[:8]).
+            Msg("Schema mismatch detected, pausing replication")
+
+    } else if now.Sub(r.lastRecomputeAt) >= schemaRecomputeInterval {
+        // We've been paused for a while - recompute to check if DDL was applied
+        r.lastRecomputeAt = now
+
+        newHash, err := r.schemaCache.Recompute(context.Background())
+        if err == nil && event.SchemaHash == newHash {
+            // Schema now matches after local DDL was applied
+            log.Info().
+                Dur("paused_for", now.Sub(r.schemaMismatchAt)).
+                Msg("Schema now matches after recompute, resuming replication")
+            r.resetMismatchState()
+            return r.db.ReplicateRow(event)
+        }
+
+        log.Warn().
+            Str("event_hash", event.SchemaHash[:8]).
+            Str("local_hash", newHash[:8]).
+            Dur("paused_for", now.Sub(r.schemaMismatchAt)).
+            Msg("Schema still mismatched after recompute")
+    }
+
+    // Still mismatched - NAK and wait
+    msg.NakWithDelay(schemaNakDelay)
+    return nil
+}
+
+func (r *Replicator) resetMismatchState() {
+    r.schemaMismatchAt = time.Time{}
+    r.lastRecomputeAt = time.Time{}
+}
+```
+
+**Behavior Summary:**
+
+| State | Action |
+|-------|--------|
+| First mismatch | Recompute hash immediately, NAK if still mismatched |
+| Subsequent NAKs within 5 min | Just NAK (no recompute) |
+| After 5 min pause | Recompute hash, check again |
+| Schema matches after recompute | Resume replication immediately |
+| Schema still mismatched | Log warning with pause duration, continue waiting |
+
+**Self-Healing After DDL:**
+
+Once DDL is applied locally (e.g., `ALTER TABLE users ADD COLUMN email TEXT`), the next recompute cycle will detect the schema change and resume replication automatically. No restart or manual intervention is required.
+
+**Performance During Pause:**
+
+- NAK redelivery: every 30 seconds
+- Hash recomputation: every 5 minutes (not every NAK cycle)
+- This minimizes database introspection overhead during prolonged migration windows
 
 ### 6. Schema Registry via NATS KV
 
@@ -504,12 +599,15 @@ harmonylite schema status --cluster
 - [ ] Ensure backward compatibility with old events (CBOR `omitempty`)
 
 ### Phase 3: Validation and Pause-on-Mismatch
+- [ ] Add `schemaMismatchAt` and `lastRecomputeAt` fields to `Replicator`
+- [ ] Implement `handleSchemaMismatch()` with periodic recompute logic
 - [ ] Add hash comparison in replication hot path (O(1) string comparison)
 - [ ] NAK with delay when schema hash mismatches (pause replication)
+- [ ] Recompute hash on first mismatch and every 5 minutes during pause
+- [ ] Auto-resume when schema matches after recompute
 - [ ] Create `__harmonylite__dead_letter_events` table
 - [ ] Implement dead-letter capture for apply failures
-- [ ] Add schema mismatch metrics (Prometheus counters)
-- [ ] Add dead-letter events gauge metric
+- [ ] Add `harmonylite_schema_mismatch_paused` gauge metric
 
 ### Phase 4: Cluster Visibility
 - [ ] Create NATS KV bucket `harmonylite-schema-registry`
@@ -520,9 +618,14 @@ harmonylite schema status --cluster
 
 ---
 
-## Configuration Reference
+## Constants
 
-No additional configuration required in the initial version.
+The following constants are used:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `schemaRecomputeInterval` | `5m` | How often to recompute schema hash during pause state |
+| `schemaNakDelay` | `30s` | Delay before NATS redelivers a NAK'd message |
 
 ---
 
@@ -534,12 +637,11 @@ No additional configuration required in the initial version.
 # Schema hash on this node (for alerting on changes)
 harmonylite_schema_hash_info{node_id="1", hash="a1b2c3d4"} 1
 
-# Events paused due to schema mismatch
-harmonylite_schema_mismatch_events_total 42
-
-# Dead-letter events (failed to apply)
-harmonylite_dead_letter_events_total{table="users"} 2
+# Replication paused due to schema mismatch (1 = paused, 0 = normal)
+harmonylite_schema_mismatch_paused 1
 ```
+
+The `harmonylite_schema_mismatch_paused` gauge is the primary metric for troubleshooting. When set to 1, check logs for hash details and apply DDL to the local node.
 
 ### Health Check Extension
 
@@ -552,8 +654,7 @@ Extend existing health check endpoint:
     "schema": {
       "status": "warning",
       "schema_hash": "a1b2c3d4e5f6",
-      "cluster_consistent": false,
-      "mismatched_nodes": [3]
+      "paused": true
     }
   }
 }
@@ -565,24 +666,34 @@ Extend existing health check endpoint:
 
 ### Performing Schema Migrations
 
-Schema migrations are performed manually on each node. Incompatible events pause replication until schemas converge.
+Schema migrations are performed manually on each node. Incompatible events pause replication until schemas converge. **No restart is required** - HarmonyLite automatically detects schema changes during the pause state.
 
 ```bash
 # 1. Apply DDL on Node 1
 sqlite3 mydb.db "ALTER TABLE users ADD COLUMN email TEXT"
 
-# 2. Restart HarmonyLite on Node 1 (schema hash is recalculated)
-systemctl restart harmonylite
-# Or run -cleanup to update schema state without full restart:
-harmonylite -cleanup -db mydb.db
+# 2. HarmonyLite detects the schema change automatically (within 5 minutes)
+#    No restart required! Replication resumes once schema matches.
 
 # 3. Repeat for other nodes
 # During migration window, nodes with older schemas will pause replication
 
-# 4. After all nodes are migrated and restarted, replication resumes automatically
+# 4. After all nodes have the new schema, replication resumes automatically
 ```
 
-**Note:** During the migration window, nodes with older schemas will pause replication and NATS will redeliver once schemas converge. Events that fail to apply (e.g., constraint violations) can be moved to the dead-letter table for manual inspection.
+**Optional: Force Immediate Detection**
+
+If you don't want to wait for the 5-minute recompute interval:
+
+```bash
+# Option A: Restart HarmonyLite (schema hash computed on startup)
+systemctl restart harmonylite
+
+# Option B: Run cleanup command
+harmonylite -cleanup -db mydb.db
+```
+
+**Note:** During the migration window, nodes with older schemas will pause replication and NATS will redeliver once schemas converge. Events that fail to apply (e.g., constraint violations) are moved to the dead-letter table for manual inspection.
 
 ---
 
