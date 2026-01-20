@@ -29,7 +29,7 @@ import (
 func main() {
 	versionFlag := flag.Bool("version", false, "Display version information")
 	flag.Parse()
-	
+
 	if *versionFlag {
 		fmt.Println(version.Get().String())
 		return
@@ -103,6 +103,27 @@ func main() {
 		return
 	}
 
+	// Handle schema status commands
+	if *cfg.SchemaStatusFlag || *cfg.SchemaStatusClusterFlag {
+		// For cluster status, we need the replicator
+		if *cfg.SchemaStatusClusterFlag {
+			snpStore, err := snapshot.NewSnapshotStorage()
+			if err != nil {
+				log.Panic().Err(err).Msg("Unable to initialize snapshot storage")
+			}
+
+			replicator, err := logstream.NewReplicator(snapshot.NewNatsDBSnapshot(streamDB, snpStore))
+			if err != nil {
+				log.Panic().Err(err).Msg("Unable to initialize replicators")
+			}
+
+			printClusterSchemaStatus(replicator)
+		} else {
+			printLocalSchemaStatus(streamDB)
+		}
+		return
+	}
+
 	snpStore, err := snapshot.NewSnapshotStorage()
 	if err != nil {
 		log.Panic().Err(err).Msg("Unable to initialize snapshot storage")
@@ -165,6 +186,22 @@ func main() {
 	if err := streamDB.InstallCDC(tableNames); err != nil {
 		log.Error().Err(err).Msg("Unable to install change data capture pipeline")
 		return
+	}
+
+	// Publish schema state to registry after CDC installation
+	schemaHash := streamDB.GetSchemaHash()
+	if schemaHash != "" {
+		if err := replicator.PublishSchemaState(schemaHash); err != nil {
+			log.Warn().Err(err).Msg("Failed to publish schema state to registry")
+		} else {
+			hashPreview := schemaHash
+			if len(schemaHash) > 16 {
+				hashPreview = schemaHash[:16] + "..."
+			}
+			log.Info().
+				Str("schema_hash", hashPreview).
+				Msg("Published schema state to cluster registry")
+		}
 	}
 
 	errChan := make(chan error)
@@ -235,9 +272,132 @@ func changeListener(
 	errChan chan error,
 ) {
 	log.Debug().Uint64("shard", shard).Msg("Listening stream")
-	err := rep.Listen(shard, onChangeEvent(streamDB, ctxSt, events))
+	err := rep.ListenWithDB(shard, streamDB, onChangeEventSimple(ctxSt, events))
 	if err != nil {
 		errChan <- err
+	}
+}
+
+func onChangeEventSimple(ctxSt *utils.StateContext, events EventBus.BusPublisher) func(event *db.ChangeLogEvent) error {
+	return func(event *db.ChangeLogEvent) error {
+		events.Publish("pulse")
+		if ctxSt.IsCanceled() {
+			return context.Canceled
+		}
+
+		if !cfg.Config.Replicate {
+			return nil
+		}
+
+		// Event has already been replicated by ListenWithDB
+		// This callback is for any additional processing
+		return nil
+	}
+}
+
+func printLocalSchemaStatus(streamDB *db.SqliteStreamDB) {
+	fmt.Println("Local Schema Status")
+	fmt.Println("===================")
+
+	schemaHash := streamDB.GetSchemaHash()
+	if schemaHash == "" {
+		fmt.Println("Schema hash: Not initialized")
+		return
+	}
+
+	fmt.Printf("Schema Hash: %s\n", schemaHash)
+	fmt.Printf("Node ID: %d\n", cfg.Config.NodeID)
+	fmt.Printf("HarmonyLite Version: %s\n", version.Get().Version)
+
+	// Get watched tables
+	tableNames, err := db.GetAllDBTables(cfg.Config.DBPath)
+	if err != nil {
+		fmt.Printf("Error listing tables: %v\n", err)
+		return
+	}
+
+	fmt.Println("\nWatched Tables:")
+	for _, table := range tableNames {
+		fmt.Printf("  - %s\n", table)
+	}
+}
+
+func printClusterSchemaStatus(replicator *logstream.Replicator) {
+	fmt.Println("Cluster Schema Status")
+	fmt.Println("=====================")
+
+	states, err := replicator.GetClusterSchemaState()
+	if err != nil {
+		fmt.Printf("Error retrieving cluster schema state: %v\n", err)
+		return
+	}
+
+	if len(states) == 0 {
+		fmt.Println("No schema state information available from cluster")
+		return
+	}
+
+	fmt.Printf("Total Nodes: %d\n", len(states))
+
+	// Check consistency
+	report, err := replicator.CheckClusterSchemaConsistency()
+	if err != nil {
+		fmt.Printf("Error checking consistency: %v\n", err)
+		return
+	}
+
+	if report.Consistent {
+		fmt.Println("Consistent: Yes")
+	} else {
+		fmt.Println("Consistent: No")
+	}
+
+	// Group nodes by hash
+	hashGroups := make(map[string][]uint64)
+	for nodeID, state := range states {
+		hashGroups[state.SchemaHash] = append(hashGroups[state.SchemaHash], nodeID)
+	}
+
+	fmt.Println("\nHash Groups:")
+	for hash, nodeIDs := range hashGroups {
+		hashPreview := hash
+		if len(hash) > 16 {
+			hashPreview = hash[:16]
+		}
+		fmt.Printf("  %s: ", hashPreview)
+		for i, nodeID := range nodeIDs {
+			if i > 0 {
+				fmt.Print(", ")
+			}
+			fmt.Printf("Node %d", nodeID)
+		}
+		fmt.Println()
+	}
+
+	// Show detailed node information
+	fmt.Println("\nNode Details:")
+	for nodeID, state := range states {
+		fmt.Printf("  Node %d:\n", nodeID)
+		fmt.Printf("    Schema Hash: %s\n", state.SchemaHash)
+		fmt.Printf("    HarmonyLite Version: %s\n", state.HarmonyLiteVersion)
+		fmt.Printf("    Updated At: %s\n", state.UpdatedAt.Format(time.RFC3339))
+	}
+
+	// Show mismatches if any
+	if !report.Consistent {
+		fmt.Println("\nSchema Mismatches:")
+		for _, mismatch := range report.Mismatches {
+			expPreview := mismatch.ExpectedHash
+			actPreview := mismatch.ActualHash
+			if len(expPreview) > 16 {
+				expPreview = expPreview[:16]
+			}
+			if len(actPreview) > 16 {
+				actPreview = actPreview[:16]
+			}
+			fmt.Printf("  Node %d: hash mismatch (expected: %s, actual: %s)\n",
+				mismatch.NodeId, expPreview, actPreview)
+		}
 	}
 }
 

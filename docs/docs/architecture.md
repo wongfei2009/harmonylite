@@ -137,6 +137,7 @@ HarmonyLite maintains system state through:
 - **Sequence Map**: Tracks the last processed message for each stream
 - **Snapshots**: Periodic database snapshots for efficient recovery
 - **CBOR Serialization**: Efficient binary encoding for change records
+- **Schema Registry**: NATS KV-backed registry for cluster-wide schema visibility
 
 ### 5. Component Design
 
@@ -351,6 +352,62 @@ graph TB
     P --> Q[Process Recent Changes]
     Q --> R
 ```
+
+## Schema Versioning
+
+HarmonyLite includes schema versioning to handle rolling upgrades where nodes may temporarily have different database schemas.
+
+### How It Works
+
+1. **Schema Hash Computation**: Each table's schema is hashed using Atlas for introspection
+2. **Message Tagging**: Every replication message includes the sender's schema hash
+3. **Validation**: Receivers compare the message hash against their local schema
+4. **Pause on Mismatch**: If schemas differ, replication pauses (NAK with delay)
+5. **Automatic Resume**: After local schema upgrade and restart, replication resumes
+
+### Schema Registry
+
+HarmonyLite maintains a NATS KeyValue registry (`harmonylite-schema-registry`) that tracks each node's schema state:
+
+```json
+{
+  "node_id": 1,
+  "schema_hash": "a1b2c3d4e5f6...",
+  "harmonylite_version": "1.2.0",
+  "updated_at": "2025-01-20T10:30:00Z"
+}
+```
+
+This enables operators to monitor schema rollout progress across the cluster.
+
+### Rolling Upgrade Flow
+
+```mermaid
+sequenceDiagram
+    participant N1 as Node 1 (Upgraded)
+    participant NATS as NATS JetStream
+    participant N2 as Node 2 (Old Schema)
+    participant N3 as Node 3 (Old Schema)
+    
+    Note over N1: Schema upgraded, new hash computed
+    N1->>NATS: Publish change (hash: abc123)
+    
+    NATS->>N2: Push message (hash: abc123)
+    Note over N2: Local hash: xyz789 ≠ abc123
+    N2->>NATS: NAK with delay (pause)
+    
+    Note over N2: Operator upgrades schema
+    Note over N2: Restart HarmonyLite
+    
+    NATS->>N2: Redeliver message (hash: abc123)
+    Note over N2: Local hash: abc123 = abc123
+    N2->>N2: Apply change
+    N2->>NATS: ACK
+    
+    Note over N3: Same process repeats
+```
+
+For detailed design documentation, see [Schema Versioning Design](design/schema-versioning.md).
 
 ## Understanding Trade-offs
 

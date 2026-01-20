@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/wongfei2009/harmonylite/stream"
+	"github.com/wongfei2009/harmonylite/telemetry"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/nats-io/nats.go"
@@ -32,6 +34,15 @@ type Replicator struct {
 	snapshot       snapshot.NatsSnapshot
 	streamMap      map[uint64]nats.JetStreamContext
 	snapshotLeader *SnapshotLeader
+
+	// Schema mismatch tracking
+	schemaMismatchAt     time.Time
+	lastRecomputeAt      time.Time
+	schemaMismatchMetric telemetry.Gauge
+	mu                   sync.RWMutex
+
+	// Schema registry for cluster-wide visibility
+	schemaRegistry *SchemaRegistry
 }
 
 func NewReplicator(
@@ -142,18 +153,30 @@ func NewReplicator(
 		snapshotLeader = NewSnapshotLeader(nodeID, metaStore, GetLeaderTTL())
 	}
 
+	// Initialize schema mismatch metric
+	schemaMismatchMetric := telemetry.NewGauge("schema_mismatch_paused", "Replication paused due to schema mismatch (1=paused, 0=normal)")
+
+	// Initialize schema registry for cluster-wide visibility
+	schemaRegistry, err := NewSchemaRegistry(nc, nodeID)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to initialize schema registry, continuing without cluster visibility")
+		schemaRegistry = nil
+	}
+
 	return &Replicator{
 		client:             nc,
 		nodeID:             nodeID,
 		compressionEnabled: compress,
 		lastSnapshot:       time.Time{},
 
-		shards:         shards,
-		streamMap:      streamMap,
-		snapshot:       snapshot,
-		repState:       repState,
-		metaStore:      metaStore,
-		snapshotLeader: snapshotLeader,
+		shards:               shards,
+		streamMap:            streamMap,
+		snapshot:             snapshot,
+		repState:             repState,
+		metaStore:            metaStore,
+		snapshotLeader:       snapshotLeader,
+		schemaMismatchMetric: schemaMismatchMetric,
+		schemaRegistry:       schemaRegistry,
 	}, nil
 }
 
@@ -471,4 +494,28 @@ func payloadDecompress(payload []byte) ([]byte, error) {
 	}
 
 	return dec.DecodeAll(payload, nil)
+}
+
+// PublishSchemaState publishes the current node's schema state to the registry
+func (r *Replicator) PublishSchemaState(schemaHash string) error {
+	if r.schemaRegistry == nil {
+		return fmt.Errorf("schema registry not initialized")
+	}
+	return r.schemaRegistry.PublishSchemaState(schemaHash)
+}
+
+// GetClusterSchemaState retrieves schema state for all nodes in the cluster
+func (r *Replicator) GetClusterSchemaState() (map[uint64]*NodeSchemaState, error) {
+	if r.schemaRegistry == nil {
+		return nil, fmt.Errorf("schema registry not initialized")
+	}
+	return r.schemaRegistry.GetClusterSchemaState()
+}
+
+// CheckClusterSchemaConsistency checks if all nodes have consistent schemas
+func (r *Replicator) CheckClusterSchemaConsistency() (*SchemaConsistencyReport, error) {
+	if r.schemaRegistry == nil {
+		return nil, fmt.Errorf("schema registry not initialized")
+	}
+	return r.schemaRegistry.CheckClusterSchemaConsistency()
 }

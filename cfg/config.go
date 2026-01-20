@@ -124,6 +124,8 @@ type Configuration struct {
 var ConfigPathFlag = flag.String("config", "", "Path to configuration file")
 var CleanupFlag = flag.Bool("cleanup", false, "Only cleanup harmonylite triggers and changelogs")
 var SaveSnapshotFlag = flag.Bool("save-snapshot", false, "Only take snapshot and upload")
+var SchemaStatusFlag = flag.Bool("schema-status", false, "Display schema status")
+var SchemaStatusClusterFlag = flag.Bool("schema-status-cluster", false, "Display cluster-wide schema status")
 var ClusterAddrFlag = flag.String("cluster-addr", "", "Cluster listening address")
 var ClusterPeersFlag = flag.String("cluster-peers", "", "Comma separated list of clusters")
 var LeafServerFlag = flag.String("leaf-servers", "", "Comma separated list of leaf servers")
@@ -186,9 +188,9 @@ var Config = &Configuration{
 		Namespace: "harmonylite",
 		Subsystem: "",
 	},
-	
+
 	HealthCheck: &HealthCheckConfiguration{
-		Enable:   false,  // Disabled by default
+		Enable:   false, // Disabled by default
 		Bind:     "0.0.0.0:8090",
 		Path:     "/health",
 		Detailed: true,

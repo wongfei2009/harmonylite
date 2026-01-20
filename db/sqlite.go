@@ -40,6 +40,7 @@ type SqliteStreamDB struct {
 	prefix            string
 	watchTablesSchema map[string][]*ColumnInfo
 	stats             *statsSqliteStreamDB
+	schemaCache       *SchemaCache
 }
 
 type ColumnInfo struct {
@@ -179,10 +180,54 @@ func (conn *SqliteStreamDB) InstallCDC(tables []string) error {
 			conn.watchTablesSchema[n] = colInfo
 		}
 
+		// Create schema version table
+		createSchemaVersionTable := `
+			CREATE TABLE IF NOT EXISTS __harmonylite__schema_version (
+				id INTEGER PRIMARY KEY CHECK (id = 1),
+				schema_hash TEXT NOT NULL,
+				updated_at INTEGER NOT NULL,
+				harmonylite_version TEXT
+			);`
+		_, err := tx.Exec(createSchemaVersionTable)
+		if err != nil {
+			return fmt.Errorf("creating schema version table: %w", err)
+		}
+
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+
+	// Initialize schema cache
+	ctx := context.Background()
+	rawDB, ok := sqlConn.DB().Db.(*sql.DB)
+	if !ok {
+		return fmt.Errorf("failed to get underlying *sql.DB connection")
+	}
+	schemaManager, err := NewSchemaManager(rawDB)
+	if err != nil {
+		return fmt.Errorf("creating schema manager: %w", err)
+	}
+
+	conn.schemaCache = NewSchemaCache()
+	if err := conn.schemaCache.Initialize(ctx, schemaManager, tables); err != nil {
+		return fmt.Errorf("initializing schema cache: %w", err)
+	}
+
+	// Store schema hash in database
+	hash := conn.schemaCache.GetSchemaHash()
+	log.Info().Str("schema_hash", hash[:16]+"...").Msg("Computed schema hash")
+
+	err = sqlConn.DB().WithTx(func(tx *goqu.TxDatabase) error {
+		_, err := tx.Exec(`
+			INSERT OR REPLACE INTO __harmonylite__schema_version (id, schema_hash, updated_at, harmonylite_version)
+			VALUES (1, ?, ?, ?)
+		`, hash, time.Now().Unix(), "dev")
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("storing schema hash: %w", err)
 	}
 
 	err = conn.installChangeLogTriggers()
@@ -331,6 +376,52 @@ func (conn *SqliteStreamDB) BackupTo(bkFilePath string) error {
 
 func (conn *SqliteStreamDB) GetRawConnection() *sqlite3.SQLiteConn {
 	return conn.rawConnection
+}
+
+// GetSchemaHash returns the cached schema hash
+func (conn *SqliteStreamDB) GetSchemaHash() string {
+	if conn.schemaCache == nil {
+		return ""
+	}
+	return conn.schemaCache.GetSchemaHash()
+}
+
+// GetSchemaCache returns the schema cache for direct access
+func (conn *SqliteStreamDB) GetSchemaCache() *SchemaCache {
+	return conn.schemaCache
+}
+
+// UpdateSchemaState recomputes the schema hash and updates the version table
+func (conn *SqliteStreamDB) UpdateSchemaState() error {
+	if conn.schemaCache == nil || !conn.schemaCache.IsInitialized() {
+		return fmt.Errorf("schema cache not initialized")
+	}
+
+	ctx := context.Background()
+	newHash, err := conn.schemaCache.Recompute(ctx)
+	if err != nil {
+		return fmt.Errorf("recomputing schema hash: %w", err)
+	}
+
+	sqlConn, err := conn.pool.Borrow()
+	if err != nil {
+		return err
+	}
+	defer sqlConn.Return()
+
+	err = sqlConn.DB().WithTx(func(tx *goqu.TxDatabase) error {
+		_, err := tx.Exec(`
+			INSERT OR REPLACE INTO __harmonylite__schema_version (id, schema_hash, updated_at, harmonylite_version)
+			VALUES (1, ?, ?, ?)
+		`, newHash, time.Now().Unix(), "dev")
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("updating schema version table: %w", err)
+	}
+
+	log.Info().Str("schema_hash", newHash[:16]+"...").Msg("Updated schema hash")
+	return nil
 }
 
 func (conn *SqliteStreamDB) GetPath() string {

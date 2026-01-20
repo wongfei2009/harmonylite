@@ -63,6 +63,7 @@ Unlike other SQLite replication solutions that require a leader-follower archite
 ![Fault Tolerant](https://img.shields.io/badge/Fault%20Tolerant-✔️-green)
 ![Built on NATS](https://img.shields.io/badge/Built%20on%20NATS-✔️-green)
 
+- **Schema Versioning**: Safe rolling upgrades with automatic pause/resume on schema mismatch
 - Multiple snapshot storage options:
   - NATS Blob Storage
   - WebDAV
@@ -77,6 +78,7 @@ Unlike other SQLite replication solutions that require a leader-follower archite
 
 Future plans for HarmonyLite include:
 - Improved documentation and examples
+- Enhanced observability and metrics
 
 ## Documentation
 

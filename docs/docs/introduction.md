@@ -19,6 +19,7 @@ The system operates with a leaderless architecture, meaning any node can accept 
 - **NATS Integration**: Leverages NATS JetStream for reliable message delivery and node coordination.
 - **Change Data Capture**: Uses SQLite triggers to capture and propagate changes.
 - **Snapshot Management**: Efficiently synchronizes new or recovering nodes.
+- **Schema Versioning**: Safe rolling upgrades with automatic pause/resume on schema mismatch detection.
 
 ## When to Use HarmonyLite
 
