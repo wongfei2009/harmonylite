@@ -623,7 +623,6 @@ WARN  Pending events still incompatible          count=5 tables=["orders"]
 WARN  Events moved to dead-letter table          count=2 tables=["users"]
 INFO  Starting NATS replication...
 ```
-```
 
 ### 8. CLI Commands
 
@@ -667,8 +666,6 @@ harmonylite schema pending
 # ===========================
 # users: 2 events (use sqlite3 to inspect __harmonylite__dead_letter_events)
 ```
-
-**Note:** There is no manual `schema replay` command. Pending events are automatically replayed on node restart.
 
 ---
 
