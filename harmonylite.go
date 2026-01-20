@@ -29,7 +29,7 @@ import (
 func main() {
 	versionFlag := flag.Bool("version", false, "Display version information")
 	flag.Parse()
-	
+
 	if *versionFlag {
 		fmt.Println(version.Get().String())
 		return
@@ -235,9 +235,26 @@ func changeListener(
 	errChan chan error,
 ) {
 	log.Debug().Uint64("shard", shard).Msg("Listening stream")
-	err := rep.Listen(shard, onChangeEvent(streamDB, ctxSt, events))
+	err := rep.ListenWithDB(shard, streamDB, onChangeEventSimple(ctxSt, events))
 	if err != nil {
 		errChan <- err
+	}
+}
+
+func onChangeEventSimple(ctxSt *utils.StateContext, events EventBus.BusPublisher) func(event *db.ChangeLogEvent) error {
+	return func(event *db.ChangeLogEvent) error {
+		events.Publish("pulse")
+		if ctxSt.IsCanceled() {
+			return context.Canceled
+		}
+
+		if !cfg.Config.Replicate {
+			return nil
+		}
+
+		// Event has already been replicated by ListenWithDB
+		// This callback is for any additional processing
+		return nil
 	}
 }
 

@@ -20,11 +20,12 @@ type sensitiveTypeWrapper struct {
 }
 
 type ChangeLogEvent struct {
-	Id        int64
-	Type      string
-	TableName string
-	Row       map[string]any
-	tableInfo []*ColumnInfo `cbor:"-"`
+	Id         int64
+	Type       string
+	TableName  string
+	Row        map[string]any
+	SchemaHash string        `cbor:"sh,omitempty"` // Hash of all watched tables at creation
+	tableInfo  []*ColumnInfo `cbor:"-"`
 }
 
 func init() {

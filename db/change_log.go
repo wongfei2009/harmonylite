@@ -520,11 +520,12 @@ func (conn *SqliteStreamDB) consumeChangeLogs(tableName string, changes []*chang
 
 		if conn.OnChange != nil {
 			err = conn.OnChange(&ChangeLogEvent{
-				Id:        changeRowID,
-				Type:      changeRow.Type,
-				TableName: tableName,
-				Row:       row,
-				tableInfo: conn.watchTablesSchema[tableName],
+				Id:         changeRowID,
+				Type:       changeRow.Type,
+				TableName:  tableName,
+				Row:        row,
+				SchemaHash: conn.GetSchemaHash(),
+				tableInfo:  conn.watchTablesSchema[tableName],
 			})
 
 			if err != nil {

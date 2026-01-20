@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/wongfei2009/harmonylite/stream"
+	"github.com/wongfei2009/harmonylite/telemetry"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/nats-io/nats.go"
@@ -32,6 +34,12 @@ type Replicator struct {
 	snapshot       snapshot.NatsSnapshot
 	streamMap      map[uint64]nats.JetStreamContext
 	snapshotLeader *SnapshotLeader
+
+	// Schema mismatch tracking
+	schemaMismatchAt     time.Time
+	lastRecomputeAt      time.Time
+	schemaMismatchMetric telemetry.Gauge
+	mu                   sync.RWMutex
 }
 
 func NewReplicator(
@@ -142,18 +150,22 @@ func NewReplicator(
 		snapshotLeader = NewSnapshotLeader(nodeID, metaStore, GetLeaderTTL())
 	}
 
+	// Initialize schema mismatch metric
+	schemaMismatchMetric := telemetry.NewGauge("schema_mismatch_paused", "Replication paused due to schema mismatch (1=paused, 0=normal)")
+
 	return &Replicator{
 		client:             nc,
 		nodeID:             nodeID,
 		compressionEnabled: compress,
 		lastSnapshot:       time.Time{},
 
-		shards:         shards,
-		streamMap:      streamMap,
-		snapshot:       snapshot,
-		repState:       repState,
-		metaStore:      metaStore,
-		snapshotLeader: snapshotLeader,
+		shards:               shards,
+		streamMap:            streamMap,
+		snapshot:             snapshot,
+		repState:             repState,
+		metaStore:            metaStore,
+		snapshotLeader:       snapshotLeader,
+		schemaMismatchMetric: schemaMismatchMetric,
 	}, nil
 }
 
