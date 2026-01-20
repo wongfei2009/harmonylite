@@ -41,7 +41,6 @@ HarmonyLite currently has **no schema versioning or mismatch detection**. When s
 - Strong consistency guarantees
 - Schema diff between nodes (users can compare hashes manually)
 - Coordinated migration protocol (users apply DDL manually per node)
-- Multiple mismatch policies (only queue/pending is supported)
 
 ---
 
@@ -88,29 +87,23 @@ import (
 
 ## Proposed Design
 
-### 1. Schema Version Tracking
+### 1. Schema Tracking
 
-Add a schema version table to each node:
+Add a schema tracking table to each node:
 
 ```sql
 CREATE TABLE IF NOT EXISTS __harmonylite__schema_version (
     id INTEGER PRIMARY KEY CHECK (id = 1),  -- Single row constraint
-    version INTEGER NOT NULL DEFAULT 0,
-    schema_hash TEXT NOT NULL,
-    tables_hash TEXT NOT NULL,              -- Hash of watched tables only
-    migrated_at INTEGER NOT NULL,
-    harmonylite_version TEXT,
-    migration_name TEXT                     -- Optional: descriptive name
+    tables_hash TEXT NOT NULL,              -- Hash of watched/replicated tables
+    updated_at INTEGER NOT NULL,
+    harmonylite_version TEXT
 );
 ```
 
 **Fields:**
-- `version`: Monotonically increasing integer, incremented on each schema change
-- `schema_hash`: SHA-256 hash of all table schemas (deterministic)
-- `tables_hash`: SHA-256 hash of only replicated/watched tables
-- `migrated_at`: Unix timestamp of last migration
-- `harmonylite_version`: HarmonyLite binary version that applied the migration
-- `migration_name`: Human-readable migration identifier (e.g., "add_user_email_column")
+- `tables_hash`: SHA-256 hash of replicated/watched table schemas (deterministic)
+- `updated_at`: Unix timestamp of last schema state update
+- `harmonylite_version`: HarmonyLite binary version that recorded the schema state
 
 ### 2. Schema Hash Calculation
 
@@ -277,16 +270,14 @@ type ChangeLogEvent struct {
     TableName string
     Row       map[string]any
 
-    // New fields for schema versioning
-    SchemaVersion int64  `cbor:"sv,omitempty"`  // Schema version when event created
-    TableHash     string `cbor:"th,omitempty"`  // Hash of table schema at creation
+    // New field for schema tracking
+    TableHash string `cbor:"th,omitempty"`  // Hash of table schema at creation
 }
 ```
 
 **Backward Compatibility:**
 - Use CBOR `omitempty` tags
-- Old events without these fields are treated as "unknown schema version"
-- Nodes can be configured to accept or reject events without version info
+- Old events without `TableHash` are treated as "unknown schema"
 
 ### 4. Pre-Replication Validation
 
@@ -367,12 +358,6 @@ When a schema mismatch is detected, events are queued for later replay:
 # config.toml
 
 [schema]
-# Include schema version in events (increases event size slightly)
-include_version_in_events = true
-
-# Reject events without schema version (for strict environments)
-require_version_in_events = false
-
 # Log level for schema warnings
 warning_log_level = "warn"
 
@@ -408,23 +393,20 @@ Broadcast schema state across the cluster using NATS KeyValue:
 const SchemaRegistryBucket = "harmonylite-schema-registry"
 
 type NodeSchemaState struct {
-    NodeId            uint64            `json:"node_id"`
-    SchemaVersion     int64             `json:"schema_version"`
-    SchemaHash        string            `json:"schema_hash"`
-    TablesHash        string            `json:"tables_hash"`
-    Tables            map[string]string `json:"tables"`  // table -> hash
-    HarmonyLiteVersion string           `json:"harmonylite_version"`
-    UpdatedAt         time.Time         `json:"updated_at"`
+    NodeId             uint64            `json:"node_id"`
+    TablesHash         string            `json:"tables_hash"`         // Combined hash of all watched tables
+    Tables             map[string]string `json:"tables"`              // table -> hash
+    HarmonyLiteVersion string            `json:"harmonylite_version"`
+    UpdatedAt          time.Time         `json:"updated_at"`
 }
 
 func (r *Replicator) PublishSchemaState() error {
     state := NodeSchemaState{
-        NodeId:            r.nodeId,
-        SchemaVersion:     r.db.GetSchemaVersion(),
-        SchemaHash:        r.db.GetSchemaHash(),
-        Tables:            r.db.GetAllTableHashes(),
+        NodeId:             r.nodeId,
+        TablesHash:         r.db.GetTablesHash(),
+        Tables:             r.db.GetAllTableHashes(),
         HarmonyLiteVersion: version.Version,
-        UpdatedAt:         time.Now(),
+        UpdatedAt:          time.Now(),
     }
 
     key := fmt.Sprintf("node-%d", r.nodeId)
@@ -466,13 +448,13 @@ func (r *Replicator) CheckClusterSchemaConsistency() (*SchemaConsistencyReport, 
     var referenceHash string
     for nodeId, state := range states {
         if referenceHash == "" {
-            referenceHash = state.SchemaHash
-        } else if state.SchemaHash != referenceHash {
+            referenceHash = state.TablesHash
+        } else if state.TablesHash != referenceHash {
             report.Consistent = false
             report.Mismatches = append(report.Mismatches, SchemaMismatch{
                 NodeId:       nodeId,
                 ExpectedHash: referenceHash,
-                ActualHash:   state.SchemaHash,
+                ActualHash:   state.TablesHash,
             })
         }
     }
@@ -494,7 +476,6 @@ CREATE TABLE IF NOT EXISTS __harmonylite__pending_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_data BLOB NOT NULL,
     table_name TEXT NOT NULL,
-    required_schema_version INTEGER,
     required_table_hash TEXT,
     queued_at INTEGER NOT NULL,
     retry_count INTEGER DEFAULT 0
@@ -506,9 +487,9 @@ func (db *SqliteStreamDB) QueuePendingEvent(event *ChangeLogEvent) error {
     data, _ := cbor.Marshal(event)
     _, err := db.db.Exec(`
         INSERT INTO __harmonylite__pending_events
-        (event_data, table_name, required_schema_version, required_table_hash, queued_at)
-        VALUES (?, ?, ?, ?, ?)`,
-        data, event.TableName, event.SchemaVersion, event.TableHash, time.Now().Unix())
+        (event_data, table_name, required_table_hash, queued_at)
+        VALUES (?, ?, ?, ?)`,
+        data, event.TableName, event.TableHash, time.Now().Unix())
     return err
 }
 
@@ -554,10 +535,8 @@ harmonylite schema status
 # Output:
 # Local Schema Status
 # ===================
-# Schema Version: 5
-# Schema Hash: a1b2c3d4e5f6...
 # Tables Hash: f6e5d4c3b2a1...
-# Migrated At: 2025-01-17 10:30:00
+# Updated At: 2025-01-17 10:30:00
 # HarmonyLite Version: 1.2.0
 #
 # Watched Tables:
@@ -572,9 +551,9 @@ harmonylite schema status --cluster
 # Total Nodes: 3
 # Consistent: No
 #
-# Node 1: v5 (hash: a1b2c3d4) - CURRENT
-# Node 2: v5 (hash: a1b2c3d4) - MATCH
-# Node 3: v4 (hash: e5f6g7h8) - MISMATCH
+# Node 1: (hash: a1b2c3d4) - CURRENT
+# Node 2: (hash: a1b2c3d4) - MATCH
+# Node 3: (hash: e5f6g7h8) - MISMATCH
 
 # Check pending events
 harmonylite schema pending
@@ -602,15 +581,15 @@ harmonylite schema replay --table users
 - [ ] Create `db/schema_manager.go` with `SchemaManager` type wrapping Atlas SQLite driver
 - [ ] Implement `InspectTables()`, `ComputeSchemaHash()`, `ComputeTableHash()`
 - [ ] Add `__harmonylite__schema_version` table creation in `InstallCDC()`
-- [ ] Add `GetSchemaVersion()` and `UpdateSchemaVersion()` methods to `SqliteStreamDB`
-- [ ] Update schema version on `-cleanup` command
+- [ ] Add `GetTablesHash()` and `UpdateTablesHash()` methods to `SqliteStreamDB`
+- [ ] Update schema state on `-cleanup` command
 - [ ] Add `harmonylite schema status` CLI command (local only)
 
 ### Phase 2: Event Enhancement
-- [ ] Add `SchemaVersion` and `TableHash` fields to `ChangeLogEvent`
-- [ ] Populate fields during event creation in `consumeChangeLogs()`
+- [ ] Add `TableHash` field to `ChangeLogEvent`
+- [ ] Populate field during event creation in `consumeChangeLogs()`
 - [ ] Ensure backward compatibility with old events (CBOR `omitempty`)
-- [ ] Add schema version caching to avoid repeated computation
+- [ ] Add table hash caching to avoid repeated computation
 
 ### Phase 3: Validation and Queue
 - [ ] Create `db/schema_validator.go` with `SchemaValidator` type
@@ -636,17 +615,6 @@ harmonylite schema replay --table users
 
 ```toml
 [schema]
-# Include schema version metadata in replication events
-# Increases event size by ~50 bytes but enables version tracking
-include_version_in_events = true
-
-# Reject events that don't have schema version metadata
-# Enable this after all nodes are upgraded to version with schema support
-require_version_in_events = false
-
-# How often to publish schema state to cluster registry (0 = on change only)
-registry_publish_interval = "0"
-
 # Maximum time to wait for pending events before discarding
 pending_event_ttl = "168h"  # 7 days
 
@@ -661,8 +629,8 @@ pending_event_alert_threshold = 1000
 ### Prometheus Metrics
 
 ```
-# Schema version on this node
-harmonylite_schema_version{node_id="1"} 5
+# Tables hash on this node (for alerting on changes)
+harmonylite_schema_tables_hash_info{node_id="1", hash="a1b2c3d4"} 1
 
 # Number of nodes with matching schema
 harmonylite_cluster_schema_consistent_nodes 2
@@ -690,7 +658,7 @@ Extend existing health check endpoint:
   "checks": {
     "schema": {
       "status": "warning",
-      "schema_version": 5,
+      "tables_hash": "a1b2c3d4e5f6",
       "cluster_consistent": false,
       "mismatched_nodes": [3],
       "pending_events": {
@@ -705,14 +673,6 @@ Extend existing health check endpoint:
 
 ## Migration Guide
 
-### Upgrading Existing Clusters
-
-1. **Upgrade HarmonyLite binary** on all nodes (supports old event format)
-2. **Enable schema tracking** with `include_version_in_events = false` initially
-3. **Verify all nodes upgraded** via `harmonylite schema status`
-4. **Enable version in events**: Set `include_version_in_events = true`
-5. **Optionally enable strict mode**: Set `require_version_in_events = true`
-
 ### Performing Schema Migrations
 
 Schema migrations are performed manually on each node. Incompatible events are automatically queued.
@@ -721,7 +681,7 @@ Schema migrations are performed manually on each node. Incompatible events are a
 # 1. Apply DDL on Node 1
 sqlite3 mydb.db "ALTER TABLE users ADD COLUMN email TEXT"
 
-# 2. Restart HarmonyLite on Node 1 (or run -cleanup to update schema version)
+# 2. Restart HarmonyLite on Node 1 (or run -cleanup to update schema state)
 harmonylite -cleanup -db mydb.db
 
 # 3. Repeat for other nodes
@@ -737,13 +697,11 @@ harmonylite schema replay --table users
 
 ## Open Questions
 
-1. **Version Numbering**: Global monotonic version vs. per-table versions? (Current design uses global version)
+1. **Event Retention**: How long to keep pending events before discarding? (Current default: 7 days)
 
-2. **Event Retention**: How long to keep pending events before discarding? (Current default: 7 days)
+2. **Automatic Replay**: Should pending events be automatically replayed when schema matches, or require manual `harmonylite schema replay`?
 
-3. **Automatic Replay**: Should pending events be automatically replayed when schema matches, or require manual `harmonylite schema replay`?
-
-4. **Hash Stability**: If Atlas changes its type normalization in a future version, hashes could change. Should we pin to a specific hash algorithm version?
+3. **Hash Stability**: If Atlas changes its type normalization in a future version, hashes could change. Should we pin to a specific hash algorithm version?
 
 ---
 
