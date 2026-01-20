@@ -279,109 +279,124 @@ type ChangeLogEvent struct {
 - Use CBOR `omitempty` tags
 - Old events without `TableHash` are treated as "unknown schema"
 
-### 4. Pre-Replication Validation
+### 4. Schema Hash Caching and Validation
 
-Validate schema compatibility before applying events:
+To avoid expensive per-event validation, table hashes are computed once and cached:
 
 ```go
-// db/schema_validator.go
+// db/schema_cache.go
 
-type SchemaValidationResult struct {
-    Compatible    bool
-    Errors        []SchemaError
-    Warnings      []SchemaWarning
+// SchemaCache holds precomputed table hashes for fast validation
+type SchemaCache struct {
+    mu          sync.RWMutex
+    tableHashes map[string]string  // table name -> hash
+    tablesHash  string             // combined hash of all watched tables
 }
 
-type SchemaError struct {
-    Type    string  // "missing_column", "missing_table", "type_mismatch"
-    Table   string
-    Column  string
-    Details string
+// Initialize computes and caches hashes for all watched tables
+func (sc *SchemaCache) Initialize(ctx context.Context, sm *SchemaManager, tables []string) error {
+    sc.mu.Lock()
+    defer sc.mu.Unlock()
+
+    sc.tableHashes = make(map[string]string)
+    for _, table := range tables {
+        hash, err := sm.ComputeTableHash(ctx, table)
+        if err != nil {
+            return fmt.Errorf("computing hash for %s: %w", table, err)
+        }
+        sc.tableHashes[table] = hash
+    }
+
+    // Compute combined hash
+    sc.tablesHash, _ = sm.ComputeSchemaHash(ctx, tables)
+    return nil
 }
 
-func (db *SqliteStreamDB) ValidateEventSchema(event *ChangeLogEvent) SchemaValidationResult {
-    result := SchemaValidationResult{Compatible: true}
+// GetTableHash returns the cached hash for a table (O(1) map lookup)
+func (sc *SchemaCache) GetTableHash(table string) (string, bool) {
+    sc.mu.RLock()
+    defer sc.mu.RUnlock()
+    hash, ok := sc.tableHashes[table]
+    return hash, ok
+}
 
-    localSchema := db.watchTablesSchema[event.TableName]
-
-    // Check 1: Table exists
-    if localSchema == nil {
-        result.Compatible = false
-        result.Errors = append(result.Errors, SchemaError{
-            Type:    "missing_table",
-            Table:   event.TableName,
-            Details: "Table does not exist on this node",
-        })
-        return result
-    }
-
-    // Check 2: All event columns exist locally
-    localCols := make(map[string]*ColumnInfo)
-    for _, col := range localSchema {
-        localCols[col.Name] = col
-    }
-
-    for colName := range event.Row {
-        if _, exists := localCols[colName]; !exists {
-            result.Compatible = false
-            result.Errors = append(result.Errors, SchemaError{
-                Type:    "missing_column",
-                Table:   event.TableName,
-                Column:  colName,
-                Details: "Column exists in event but not on this node",
-            })
-        }
-    }
-
-    // Check 3: Table hash comparison (if available)
-    if event.TableHash != "" {
-        localHash, _ := db.ComputeTableHash(event.TableName)
-        if event.TableHash != localHash {
-            result.Warnings = append(result.Warnings, SchemaWarning{
-                Type:    "schema_drift",
-                Table:   event.TableName,
-                Details: fmt.Sprintf("Table hash mismatch: event=%s local=%s",
-                    event.TableHash[:8], localHash[:8]),
-            })
-        }
-    }
-
-    return result
+// Invalidate clears the cache, forcing recomputation on next access
+func (sc *SchemaCache) Invalidate() {
+    sc.mu.Lock()
+    defer sc.mu.Unlock()
+    sc.tableHashes = nil
+    sc.tablesHash = ""
 }
 ```
 
+**Per-Event Validation (Hot Path):**
+
+The validation in the replication hot path is a simple string comparison:
+
+```go
+// logstream/replicator.go
+
+func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent) error {
+    // Fast path: hash comparison only (O(1))
+    if event.TableHash != "" {
+        localHash, ok := r.schemaCache.GetTableHash(event.TableName)
+        if !ok {
+            // Table not in watched list - this shouldn't happen
+            return fmt.Errorf("unknown table: %s", event.TableName)
+        }
+        if event.TableHash != localHash {
+            // Schema mismatch - queue for later
+            log.Warn().
+                Str("table", event.TableName).
+                Str("event_hash", event.TableHash[:8]).
+                Str("local_hash", localHash[:8]).
+                Msg("Schema mismatch, queuing event")
+            return r.db.QueuePendingEvent(event)
+        }
+    }
+
+    // Hashes match (or no hash in event) - apply directly
+    return r.db.ReplicateRow(event)
+}
+```
+
+**Performance Characteristics:**
+
+| Operation | Cost | When |
+|-----------|------|------|
+| Hash computation | O(columns) + PRAGMA calls | Once at startup, on `-cleanup`, or schema change detection |
+| Per-event validation | O(1) string comparison | Every incoming event |
+| Cache lookup | O(1) map access with RLock | Every incoming event |
+
+**Cache Invalidation:**
+
+The cache is invalidated and recomputed:
+- On HarmonyLite startup
+- When running `harmonylite -cleanup`
+- When a schema change is detected (future: via SQLite update hook on `sqlite_master`)
+
 ### 5. Schema Mismatch Handling (Queue Policy)
 
-When a schema mismatch is detected, events are queued for later replay:
+When a schema mismatch is detected (hash comparison fails), events are queued for later replay:
 
 ```toml
 # config.toml
 
 [schema]
-# Log level for schema warnings
-warning_log_level = "warn"
+# Include table hash in events (increases event size slightly)
+include_hash_in_events = true
 
-# Maximum time to wait for pending events before discarding
+# Reject events without table hash (for strict environments)
+require_hash_in_events = false
+
+# Maximum time to keep pending events before discarding
 pending_event_ttl = "168h"  # 7 days
 
 # Maximum pending events per table before alerting
 pending_event_alert_threshold = 1000
 ```
 
-**Behavior:** When an incoming event cannot be applied due to schema mismatch (e.g., missing column), the event is stored in a pending queue. After the user applies the DDL migration manually, they run `harmonylite schema replay` to apply the queued events.
-
-```go
-// logstream/replicator.go
-
-func (r *Replicator) handleSchemaMismatch(event *ChangeLogEvent, result SchemaValidationResult) error {
-    log.Warn().
-        Str("table", event.TableName).
-        Interface("errors", result.Errors).
-        Msg("Schema mismatch detected, queuing event for later replay")
-    
-    return r.db.QueuePendingEvent(event)
-}
-```
+**Behavior:** When an incoming event's `TableHash` doesn't match the cached local hash, the event is stored in a pending queue. After the user applies the DDL migration manually, they run `harmonylite schema replay` to apply the queued events.
 
 ### 6. Schema Registry via NATS KV
 
@@ -551,9 +566,9 @@ harmonylite schema status --cluster
 # Total Nodes: 3
 # Consistent: No
 #
-# Node 1: (hash: a1b2c3d4) - CURRENT
-# Node 2: (hash: a1b2c3d4) - MATCH
-# Node 3: (hash: e5f6g7h8) - MISMATCH
+# Hash Groups:
+#   a1b2c3d4: Node 1, Node 2
+#   e5f6g7h8: Node 3
 
 # Check pending events
 harmonylite schema pending
@@ -580,23 +595,22 @@ harmonylite schema replay --table users
 - [ ] Add `ariga.io/atlas` dependency to `go.mod`
 - [ ] Create `db/schema_manager.go` with `SchemaManager` type wrapping Atlas SQLite driver
 - [ ] Implement `InspectTables()`, `ComputeSchemaHash()`, `ComputeTableHash()`
+- [ ] Create `db/schema_cache.go` with `SchemaCache` type for caching table hashes
 - [ ] Add `__harmonylite__schema_version` table creation in `InstallCDC()`
-- [ ] Add `GetTablesHash()` and `UpdateTablesHash()` methods to `SqliteStreamDB`
-- [ ] Update schema state on `-cleanup` command
+- [ ] Initialize schema cache on startup
+- [ ] Update schema state on `-cleanup` command (invalidate and recompute cache)
 - [ ] Add `harmonylite schema status` CLI command (local only)
 
 ### Phase 2: Event Enhancement
 - [ ] Add `TableHash` field to `ChangeLogEvent`
-- [ ] Populate field during event creation in `consumeChangeLogs()`
+- [ ] Populate field during event creation using cached hash (O(1) lookup)
 - [ ] Ensure backward compatibility with old events (CBOR `omitempty`)
-- [ ] Add table hash caching to avoid repeated computation
 
 ### Phase 3: Validation and Queue
-- [ ] Create `db/schema_validator.go` with `SchemaValidator` type
-- [ ] Implement `ValidateEventSchema()` using cached schema info
+- [ ] Add hash comparison in replication hot path (O(1) string comparison)
 - [ ] Create `__harmonylite__pending_events` table
 - [ ] Implement `QueuePendingEvent()` in `db/pending_events.go`
-- [ ] Implement `ReplayPendingEvents()` with validation
+- [ ] Implement `ReplayPendingEvents()` with hash re-check
 - [ ] Add pending event TTL and cleanup
 - [ ] Add `harmonylite schema pending` and `harmonylite schema replay` commands
 - [ ] Add schema mismatch metrics (Prometheus counters)
@@ -615,7 +629,18 @@ harmonylite schema replay --table users
 
 ```toml
 [schema]
-# Maximum time to wait for pending events before discarding
+# Include table hash metadata in replication events
+# Increases event size by ~35 bytes but enables schema mismatch detection
+include_hash_in_events = true
+
+# Reject events that don't have table hash metadata
+# Enable this after all nodes are upgraded to version with schema support
+require_hash_in_events = false
+
+# How often to publish schema state to cluster registry (0 = on change only)
+registry_publish_interval = "0"
+
+# Maximum time to keep pending events before discarding
 pending_event_ttl = "168h"  # 7 days
 
 # Maximum pending events per table before alerting
