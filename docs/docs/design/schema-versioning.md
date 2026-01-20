@@ -566,31 +566,7 @@ func (r *Replicator) CheckClusterSchemaConsistency() (*SchemaConsistencyReport, 
 }
 ```
 
-### 7. Apply Failure Handling (Dead-Letter)
-
-Events that match the schema hash but fail to apply (e.g., constraint violations) can be moved to a dead-letter table for manual inspection.
-
-```sql
-CREATE TABLE IF NOT EXISTS __harmonylite__dead_letter_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_data BLOB NOT NULL,
-    table_name TEXT NOT NULL,
-    schema_hash TEXT,
-    error_message TEXT NOT NULL,
-    failed_at INTEGER NOT NULL,
-    source_node_id INTEGER,
-    stream_name TEXT NOT NULL,
-    stream_seq INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_dead_letter_table ON __harmonylite__dead_letter_events(table_name);
-```
-
-Users can query dead-letter events directly:
-```bash
-sqlite3 mydb.db "SELECT table_name, error_message, datetime(failed_at, 'unixepoch') FROM __harmonylite__dead_letter_events"
-```
-
-### 8. CLI Commands
+### 7. CLI Commands
 
 Add schema management commands:
 
@@ -650,8 +626,6 @@ harmonylite schema status --cluster
 - [ ] Implement `checkStreamGap()` to detect truncated messages during pause
 - [ ] Exit process when stream gap detected (triggers snapshot restore on restart)
 - [ ] Auto-resume when schema matches after recompute
-- [ ] Create `__harmonylite__dead_letter_events` table
-- [ ] Implement dead-letter capture for apply failures
 - [ ] Add `harmonylite_schema_mismatch_paused` gauge metric
 
 ### Phase 4: Cluster Visibility
@@ -738,7 +712,7 @@ systemctl restart harmonylite
 harmonylite -cleanup -db mydb.db
 ```
 
-**Note:** During the migration window, nodes with older schemas will pause replication and NATS will redeliver once schemas converge. Events that fail to apply (e.g., constraint violations) are moved to the dead-letter table for manual inspection.
+**Note:** During the migration window, nodes with older schemas will pause replication and NATS will redeliver once schemas converge.
 
 ---
 
