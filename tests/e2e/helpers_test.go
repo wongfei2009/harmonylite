@@ -299,3 +299,100 @@ func countAuthorsByID(dbPath string, id int64) int {
 	Expect(err).To(BeNil(), "Error counting ID %d in %s", id, dbPath)
 	return count
 }
+
+// -- Schema Migration Helpers --
+
+// alterTableAddColumn adds a column to a table in the specified database
+// It also drops the change_log table so HarmonyLite will recreate it with the new schema
+func alterTableAddColumn(dbPath, table, column, colType string) {
+	defer GinkgoRecover()
+	GinkgoWriter.Printf("Adding column %s to table %s in %s\n", column, table, dbPath)
+	db, err := sql.Open("sqlite3", dbPath)
+	Expect(err).To(BeNil(), "Failed to open database %s", dbPath)
+	defer db.Close()
+
+	// Add the column to the main table
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colType))
+	Expect(err).To(BeNil(), "Failed to add column %s to table %s in %s", column, table, dbPath)
+
+	// Drop the change_log table so HarmonyLite will recreate it with the new column
+	// This is necessary because the change_log table schema must match the source table
+	changeLogTable := fmt.Sprintf("__harmonylite__%s_change_log", table)
+	_, err = db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", changeLogTable))
+	Expect(err).To(BeNil(), "Failed to drop change_log table %s in %s", changeLogTable, dbPath)
+	GinkgoWriter.Printf("Dropped change_log table %s to allow recreation with new schema\n", changeLogTable)
+}
+
+// hasColumn checks if a column exists in a table
+func hasColumn(dbPath, table, column string) bool {
+	defer GinkgoRecover()
+	db, err := sql.Open("sqlite3", dbPath)
+	Expect(err).To(BeNil())
+	defer db.Close()
+
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	Expect(err).To(BeNil())
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dfltValue interface{}
+		err = rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk)
+		Expect(err).To(BeNil())
+		if name == column {
+			return true
+		}
+	}
+	return false
+}
+
+// insertBookWithRating inserts a book with an optional rating (for schema with rating column)
+func insertBookWithRating(dbPath, title, author string, year int, rating *int) int64 {
+	defer GinkgoRecover()
+	GinkgoWriter.Printf("Inserting %s with rating into %s\n", title, dbPath)
+	db, err := sql.Open("sqlite3", dbPath)
+	Expect(err).To(BeNil(), "Error opening database %s", dbPath)
+	defer db.Close()
+
+	var res sql.Result
+	if rating != nil {
+		res, err = db.Exec(`INSERT INTO Books (title, author, publication_year, rating) VALUES (?, ?, ?, ?)`, title, author, year, *rating)
+	} else {
+		res, err = db.Exec(`INSERT INTO Books (title, author, publication_year, rating) VALUES (?, ?, ?, NULL)`, title, author, year)
+	}
+	Expect(err).To(BeNil(), "Error inserting book with rating into %s", dbPath)
+	id, err := res.LastInsertId()
+	Expect(err).To(BeNil(), "Error getting last insert ID from %s", dbPath)
+	return id
+}
+
+// waitForCDCReady waits for HarmonyLite to finish initializing CDC (triggers created)
+// by checking if the change_log table exists for the specified table
+func waitForCDCReady(dbPath, table string) {
+	defer GinkgoRecover()
+	changeLogTable := fmt.Sprintf("__harmonylite__%s_change_log", table)
+	GinkgoWriter.Printf("Waiting for CDC initialization (table %s) in %s\n", changeLogTable, dbPath)
+
+	Eventually(func() bool {
+		db, err := sql.Open("sqlite3", dbPath)
+		if err != nil {
+			return false
+		}
+		defer db.Close()
+
+		// Check if the change_log table exists
+		var name string
+		err = db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", changeLogTable).Scan(&name)
+		if err == sql.ErrNoRows {
+			return false
+		}
+		if err != nil {
+			return false
+		}
+		return name == changeLogTable
+	}, maxWaitTime, pollInterval).Should(BeTrue(), "CDC change_log table %s not created in %s", changeLogTable, dbPath)
+
+	GinkgoWriter.Printf("CDC initialization complete for %s in %s\n", table, dbPath)
+}

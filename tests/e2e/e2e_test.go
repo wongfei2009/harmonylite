@@ -294,4 +294,109 @@ var _ = Describe("HarmonyLite End-to-End Tests", Ordered, func() {
 		// E2E testing of failover with embedded NATS clusters is inherently flaky
 		// due to JetStream quorum requirements and cluster reformation timing
 	})
+
+	Context("Schema Mismatch Pause and Resume", func() {
+		// This test validates the schema versioning feature:
+		// 1. When sender has a different schema than receiver, replication pauses
+		// 2. After receiver's schema is upgraded, replication resumes automatically
+
+		It("should pause replication on schema mismatch and resume after upgrade", func() {
+			db1Path := filepath.Join(dbDir, "harmonylite-1.db")
+			db2Path := filepath.Join(dbDir, "harmonylite-2.db")
+			db3Path := filepath.Join(dbDir, "harmonylite-3.db")
+
+			// Step 1: Verify normal replication is working (baseline)
+			baselineID := insertBook(db1Path, "Schema Test Baseline", "Author", 2025)
+			Eventually(func() int {
+				return countBooksByID(db2Path, baselineID)
+			}, maxWaitTime, pollInterval).Should(Equal(1), "Baseline replication should work before schema change")
+			Eventually(func() int {
+				return countBooksByID(db3Path, baselineID)
+			}, maxWaitTime, pollInterval).Should(Equal(1), "Baseline replication should work on node 3")
+			GinkgoWriter.Println("Baseline replication verified - all nodes in sync")
+
+			// Step 2: Stop node 1 and upgrade its schema
+			stopNodes(node1)
+			time.Sleep(2 * time.Second)
+
+			// Add a "rating" column to Books table on node 1 only
+			alterTableAddColumn(db1Path, "Books", "rating", "INTEGER")
+			Expect(hasColumn(db1Path, "Books", "rating")).To(BeTrue(), "Column should exist after ALTER TABLE")
+			Expect(hasColumn(db2Path, "Books", "rating")).To(BeFalse(), "Node 2 should not have the new column yet")
+			GinkgoWriter.Println("Schema upgraded on node 1 - added 'rating' column to Books")
+
+			// Step 3: Restart node 1 with the new schema
+			node1 = startNode("examples/node-1-config.toml", "127.0.0.1:4221", "nats://127.0.0.1:4222/,nats://127.0.0.1:4223/", 1)
+			GinkgoWriter.Println("Node 1 restarted with upgraded schema")
+
+			// Wait for CDC initialization to complete (triggers and change_log table created)
+			waitForCDCReady(db1Path, "Books")
+
+			// Step 4: Insert data from node 1 (with new schema)
+			// This will have a different schema hash than nodes 2 and 3
+			rating := 5
+			mismatchID := insertBookWithRating(db1Path, "Schema Mismatch Test", "Author", 2025, &rating)
+			GinkgoWriter.Printf("Inserted book with ID %d from upgraded node 1\n", mismatchID)
+
+			// Step 5: Verify replication is PAUSED on node 2 (schema mismatch)
+			// The data should NOT replicate because the schemas don't match
+			Consistently(func() int {
+				return countBooksByID(db2Path, mismatchID)
+			}, 10*time.Second, pollInterval).Should(Equal(0), "Replication should be paused due to schema mismatch - data should NOT appear on node 2")
+			GinkgoWriter.Println("Verified: Replication is paused on node 2 due to schema mismatch")
+
+			// Step 6: Upgrade schema on node 2 (rolling upgrade simulation)
+			stopNodes(node2)
+			time.Sleep(2 * time.Second)
+			alterTableAddColumn(db2Path, "Books", "rating", "INTEGER")
+			Expect(hasColumn(db2Path, "Books", "rating")).To(BeTrue(), "Node 2 should now have the rating column")
+			GinkgoWriter.Println("Schema upgraded on node 2")
+
+			// Restart node 2
+			node2 = startNode("examples/node-2-config.toml", "127.0.0.1:4222", "nats://127.0.0.1:4221/,nats://127.0.0.1:4223/", 2)
+			GinkgoWriter.Println("Node 2 restarted with upgraded schema")
+
+			// Wait for CDC initialization to complete
+			waitForCDCReady(db2Path, "Books")
+
+			// Step 7: Verify replication RESUMES and data appears on node 2
+			Eventually(func() int {
+				return countBooksByID(db2Path, mismatchID)
+			}, maxWaitTime*2, pollInterval).Should(Equal(1), "Replication should resume after schema upgrade - data should appear on node 2")
+			GinkgoWriter.Println("Verified: Replication resumed on node 2 after schema upgrade")
+
+			// Step 8: Verify node 3 is still paused (hasn't been upgraded yet)
+			Consistently(func() int {
+				return countBooksByID(db3Path, mismatchID)
+			}, 5*time.Second, pollInterval).Should(Equal(0), "Node 3 should still be paused - schema not upgraded")
+			GinkgoWriter.Println("Verified: Node 3 still paused (schema not yet upgraded)")
+
+			// Step 9: Complete rolling upgrade on node 3
+			stopNodes(node3)
+			time.Sleep(2 * time.Second)
+			alterTableAddColumn(db3Path, "Books", "rating", "INTEGER")
+			node3 = startNode("examples/node-3-config.toml", "127.0.0.1:4223", "nats://127.0.0.1:4221/,nats://127.0.0.1:4222/", 3)
+			GinkgoWriter.Println("Node 3 restarted with upgraded schema")
+
+			// Wait for CDC initialization to complete
+			waitForCDCReady(db3Path, "Books")
+
+			// Step 10: Verify all nodes are now in sync
+			Eventually(func() int {
+				return countBooksByID(db3Path, mismatchID)
+			}, maxWaitTime*2, pollInterval).Should(Equal(1), "Replication should resume on node 3 after upgrade")
+			GinkgoWriter.Println("Verified: All nodes now in sync with upgraded schema")
+
+			// Final verification: new inserts replicate normally across all nodes
+			finalRating := 4
+			finalID := insertBookWithRating(db1Path, "Post-Upgrade Test", "Author", 2025, &finalRating)
+			Eventually(func() int {
+				return countBooksByID(db2Path, finalID)
+			}, maxWaitTime, pollInterval).Should(Equal(1), "Post-upgrade replication to node 2 should work")
+			Eventually(func() int {
+				return countBooksByID(db3Path, finalID)
+			}, maxWaitTime, pollInterval).Should(Equal(1), "Post-upgrade replication to node 3 should work")
+			GinkgoWriter.Println("Final verification: Normal replication works after complete rolling upgrade")
+		})
+	})
 })
