@@ -396,7 +396,7 @@ pending_event_ttl = "168h"  # 7 days
 pending_event_alert_threshold = 1000
 ```
 
-**Behavior:** When an incoming event's `TableHash` doesn't match the cached local hash, the event is stored in a pending queue. After the user applies the DDL migration manually, they run `harmonylite schema replay` to apply the queued events.
+**Behavior:** When an incoming event's `TableHash` doesn't match the cached local hash, the event is stored in a pending queue. Pending events are automatically replayed on node restart (see Section 7).
 
 ### 6. Schema Registry via NATS KV
 
@@ -478,25 +478,79 @@ func (r *Replicator) CheckClusterSchemaConsistency() (*SchemaConsistencyReport, 
 }
 ```
 
-### 7. Queued Event Replay
+### 7. Automatic Pending Event Replay
 
-For `queue` policy, implement a pending event store:
+Pending events are automatically replayed on node startup, before normal replication begins. This ensures proper event ordering without requiring manual intervention.
 
-```go
-// db/pending_events.go
+#### Pending Events Table
 
-// SQLite table for pending events
-const PendingEventsSchema = `
+```sql
 CREATE TABLE IF NOT EXISTS __harmonylite__pending_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_data BLOB NOT NULL,
     table_name TEXT NOT NULL,
     required_table_hash TEXT,
-    queued_at INTEGER NOT NULL,
-    retry_count INTEGER DEFAULT 0
+    queued_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pending_table ON __harmonylite__pending_events(table_name);
-`
+```
+
+#### Dead-Letter Table
+
+Events that fail to apply (schema matches but apply fails, e.g., constraint violation) are moved to a dead-letter table for manual inspection:
+
+```sql
+CREATE TABLE IF NOT EXISTS __harmonylite__dead_letter_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_event_id INTEGER,          -- ID from pending_events table
+    event_data BLOB NOT NULL,
+    table_name TEXT NOT NULL,
+    table_hash TEXT,
+    error_message TEXT NOT NULL,        -- Why it failed
+    queued_at INTEGER NOT NULL,         -- When originally queued
+    failed_at INTEGER NOT NULL,         -- When moved to dead-letter
+    source_node_id INTEGER              -- Node that originated the event
+);
+CREATE INDEX IF NOT EXISTS idx_dead_letter_table ON __harmonylite__dead_letter_events(table_name);
+```
+
+Users can query dead-letter events directly:
+```bash
+sqlite3 mydb.db "SELECT table_name, error_message, datetime(failed_at, 'unixepoch') FROM __harmonylite__dead_letter_events"
+```
+
+#### Startup Sequence
+
+```go
+// Startup sequence in main.go / replicator initialization
+
+func (r *Replicator) Start() error {
+    // 1. Initialize schema cache
+    if err := r.schemaCache.Initialize(ctx, r.schemaManager, r.watchedTables); err != nil {
+        return err
+    }
+
+    // 2. Replay pending events BEFORE starting replication
+    replayed, warned, failed := r.replayPendingEvents()
+    if replayed > 0 {
+        log.Info().Int("count", replayed).Msg("Replayed pending events")
+    }
+    if warned > 0 {
+        log.Warn().Int("count", warned).Msg("Pending events still incompatible with current schema")
+    }
+    if failed > 0 {
+        log.Warn().Int("count", failed).Msg("Events moved to dead-letter table")
+    }
+
+    // 3. Start normal replication from NATS
+    return r.startReplication()
+}
+```
+
+#### Replay Logic
+
+```go
+// db/pending_events.go
 
 func (db *SqliteStreamDB) QueuePendingEvent(event *ChangeLogEvent) error {
     data, _ := cbor.Marshal(event)
@@ -508,36 +562,76 @@ func (db *SqliteStreamDB) QueuePendingEvent(event *ChangeLogEvent) error {
     return err
 }
 
-func (db *SqliteStreamDB) ReplayPendingEvents(tableName string) (int, error) {
-    // Called after schema migration completes
+func (db *SqliteStreamDB) ReplayPendingEvents(schemaCache *SchemaCache) (replayed, stillPending, deadLettered int) {
     rows, err := db.db.Query(`
-        SELECT id, event_data FROM __harmonylite__pending_events
-        WHERE table_name = ? ORDER BY id ASC`, tableName)
+        SELECT id, event_data, table_name, required_table_hash, queued_at
+        FROM __harmonylite__pending_events
+        ORDER BY id ASC`)
     if err != nil {
-        return 0, err
+        return 0, 0, 0
     }
     defer rows.Close()
 
-    replayed := 0
     for rows.Next() {
-        var id int64
+        var id, queuedAt int64
         var data []byte
-        rows.Scan(&id, &data)
+        var tableName, requiredHash string
+        rows.Scan(&id, &data, &tableName, &requiredHash, &queuedAt)
 
         var event ChangeLogEvent
         cbor.Unmarshal(data, &event)
 
-        // Re-validate and apply
-        result := db.ValidateEventSchema(&event)
-        if result.Compatible {
-            db.replicateRow(&event)
+        // Check if schema now matches
+        localHash, _ := schemaCache.GetTableHash(tableName)
+        if requiredHash != "" && requiredHash != localHash {
+            // Still incompatible - keep in queue
+            stillPending++
+            continue
+        }
+
+        // Schema matches - try to apply
+        err := db.replicateRow(&event)
+        if err != nil {
+            // Apply failed - move to dead-letter
+            db.moveToDeadLetter(id, &event, data, queuedAt, err.Error())
+            deadLettered++
+        } else {
+            // Success - remove from pending
             db.db.Exec("DELETE FROM __harmonylite__pending_events WHERE id = ?", id)
             replayed++
         }
     }
 
-    return replayed, nil
+    return replayed, stillPending, deadLettered
 }
+
+func (db *SqliteStreamDB) moveToDeadLetter(originalId int64, event *ChangeLogEvent, data []byte, queuedAt int64, errMsg string) {
+    db.db.Exec(`
+        INSERT INTO __harmonylite__dead_letter_events
+        (original_event_id, event_data, table_name, table_hash, error_message, queued_at, failed_at, source_node_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        originalId, data, event.TableName, event.TableHash, errMsg, queuedAt, time.Now().Unix(), event.NodeId)
+    
+    db.db.Exec("DELETE FROM __harmonylite__pending_events WHERE id = ?", originalId)
+}
+```
+
+**Three outcomes per event:**
+1. **Schema still mismatched** → stays in pending queue, logged as warning
+2. **Schema matches, apply succeeds** → removed from pending
+3. **Schema matches, apply fails** → moved to dead-letter table
+
+#### Startup Logging
+
+```
+INFO  Starting HarmonyLite v1.2.0
+INFO  Initializing schema cache for 3 tables
+INFO  Replaying pending events...
+INFO  Replayed pending events                    count=42
+WARN  Pending events still incompatible          count=5 tables=["orders"]
+WARN  Events moved to dead-letter table          count=2 tables=["users"]
+INFO  Starting NATS replication...
+```
 ```
 
 ### 8. CLI Commands
@@ -570,22 +664,20 @@ harmonylite schema status --cluster
 #   a1b2c3d4: Node 1, Node 2
 #   e5f6g7h8: Node 3
 
-# Check pending events
+# Check pending and dead-letter events
 harmonylite schema pending
 # Output:
 # Pending Events by Table
 # =======================
-# users: 42 events (oldest: 2025-01-17 10:30:00)
+# users: 5 events (oldest: 2025-01-17 10:30:00)
 # orders: 0 events
-
-# Replay pending events after manual DDL migration
-harmonylite schema replay --table users
-# Output:
-# Replaying pending events for table 'users'...
-# Replayed: 42 events
-# Failed: 0 events
-# Remaining: 0 events
+#
+# Dead-Letter Events by Table
+# ===========================
+# users: 2 events (use sqlite3 to inspect __harmonylite__dead_letter_events)
 ```
+
+**Note:** There is no manual `schema replay` command. Pending events are automatically replayed on node restart.
 
 ---
 
@@ -606,15 +698,18 @@ harmonylite schema replay --table users
 - [ ] Populate field during event creation using cached hash (O(1) lookup)
 - [ ] Ensure backward compatibility with old events (CBOR `omitempty`)
 
-### Phase 3: Validation and Queue
+### Phase 3: Validation and Automatic Replay
 - [ ] Add hash comparison in replication hot path (O(1) string comparison)
 - [ ] Create `__harmonylite__pending_events` table
+- [ ] Create `__harmonylite__dead_letter_events` table
 - [ ] Implement `QueuePendingEvent()` in `db/pending_events.go`
-- [ ] Implement `ReplayPendingEvents()` with hash re-check
+- [ ] Implement `ReplayPendingEvents()` with automatic startup replay
+- [ ] Implement `moveToDeadLetter()` for failed event handling
 - [ ] Add pending event TTL and cleanup
-- [ ] Add `harmonylite schema pending` and `harmonylite schema replay` commands
+- [ ] Add `harmonylite schema pending` command (shows pending and dead-letter counts)
 - [ ] Add schema mismatch metrics (Prometheus counters)
 - [ ] Add pending events gauge metric
+- [ ] Add dead-letter events gauge metric
 
 ### Phase 4: Cluster Visibility
 - [ ] Create NATS KV bucket `harmonylite-schema-registry`
@@ -669,6 +764,9 @@ harmonylite_schema_mismatch_events_total{table="users"} 42
 # Pending events waiting for schema match
 harmonylite_pending_events{table="users"} 156
 
+# Dead-letter events (failed to apply)
+harmonylite_dead_letter_events{table="users"} 2
+
 # Time since oldest pending event (seconds)
 harmonylite_pending_events_age_seconds{table="users"} 3600
 ```
@@ -700,23 +798,26 @@ Extend existing health check endpoint:
 
 ### Performing Schema Migrations
 
-Schema migrations are performed manually on each node. Incompatible events are automatically queued.
+Schema migrations are performed manually on each node. Incompatible events are automatically queued and replayed on restart.
 
 ```bash
 # 1. Apply DDL on Node 1
 sqlite3 mydb.db "ALTER TABLE users ADD COLUMN email TEXT"
 
-# 2. Restart HarmonyLite on Node 1 (or run -cleanup to update schema state)
+# 2. Restart HarmonyLite on Node 1 (pending events are automatically replayed)
+systemctl restart harmonylite
+# Or run -cleanup to update schema state without full restart:
 harmonylite -cleanup -db mydb.db
 
 # 3. Repeat for other nodes
 # During migration window, events from migrated nodes are queued on non-migrated nodes
 
-# 4. After all nodes are migrated, replay pending events
-harmonylite schema replay --table users
+# 4. After all nodes are migrated and restarted, pending events are automatically replayed
+# Check for any remaining issues:
+harmonylite schema pending
 ```
 
-**Note:** During the migration window, nodes with older schemas will queue events from nodes with newer schemas. Once all nodes have the same schema, run `harmonylite schema replay` to apply queued events.
+**Note:** During the migration window, nodes with older schemas will queue events from nodes with newer schemas. Once a node has the matching schema and restarts, pending events are automatically replayed. Events that fail to apply (e.g., constraint violations) are moved to the dead-letter table for manual inspection.
 
 ---
 
@@ -724,9 +825,7 @@ harmonylite schema replay --table users
 
 1. **Event Retention**: How long to keep pending events before discarding? (Current default: 7 days)
 
-2. **Automatic Replay**: Should pending events be automatically replayed when schema matches, or require manual `harmonylite schema replay`?
-
-3. **Hash Stability**: If Atlas changes its type normalization in a future version, hashes could change. Should we pin to a specific hash algorithm version?
+2. **Hash Stability**: If Atlas changes its type normalization in a future version, hashes could change. Should we pin to a specific hash algorithm version?
 
 ---
 
