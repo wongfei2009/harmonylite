@@ -329,7 +329,7 @@ func (sc *SchemaCache) Invalidate() {
 }
 ```
 
-**Per-Event Validation (Hot Path):**
+**Per-Event Validation:**
 
 The validation in the replication hot path is a simple string comparison:
 
@@ -383,17 +383,8 @@ When a schema mismatch is detected (hash comparison fails), events are queued fo
 # config.toml
 
 [schema]
-# Include table hash in events (increases event size slightly)
-include_hash_in_events = true
-
-# Reject events without table hash (for strict environments)
-require_hash_in_events = false
-
 # Maximum time to keep pending events before discarding
 pending_event_ttl = "168h"  # 7 days
-
-# Maximum pending events per table before alerting
-pending_event_alert_threshold = 1000
 ```
 
 **Behavior:** When an incoming event's `TableHash` doesn't match the cached local hash, the event is stored in a pending queue. Pending events are automatically replayed on node restart (see Section 7).
@@ -724,22 +715,8 @@ harmonylite schema pending
 
 ```toml
 [schema]
-# Include table hash metadata in replication events
-# Increases event size by ~35 bytes but enables schema mismatch detection
-include_hash_in_events = true
-
-# Reject events that don't have table hash metadata
-# Enable this after all nodes are upgraded to version with schema support
-require_hash_in_events = false
-
-# How often to publish schema state to cluster registry (0 = on change only)
-registry_publish_interval = "0"
-
 # Maximum time to keep pending events before discarding
 pending_event_ttl = "168h"  # 7 days
-
-# Maximum pending events per table before alerting
-pending_event_alert_threshold = 1000
 ```
 
 ---
