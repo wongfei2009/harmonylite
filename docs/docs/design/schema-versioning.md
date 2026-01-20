@@ -32,7 +32,7 @@ HarmonyLite currently has **no schema versioning or mismatch detection**. When s
 
 1. **Detect** schema mismatches before they cause replication failures
 2. **Provide visibility** into cluster-wide schema state
-3. **Enable graceful handling** of schema differences during rolling upgrades by queuing incompatible events
+3. **Pause replication safely** during rolling upgrades until schema versions converge
 
 ## Non-Goals
 
@@ -94,14 +94,14 @@ Add a schema tracking table to each node:
 ```sql
 CREATE TABLE IF NOT EXISTS __harmonylite__schema_version (
     id INTEGER PRIMARY KEY CHECK (id = 1),  -- Single row constraint
-    tables_hash TEXT NOT NULL,              -- Hash of watched/replicated tables
+    schema_hash TEXT NOT NULL,              -- Hash of watched/replicated tables
     updated_at INTEGER NOT NULL,
     harmonylite_version TEXT
 );
 ```
 
 **Fields:**
-- `tables_hash`: SHA-256 hash of replicated/watched table schemas (deterministic)
+- `schema_hash`: SHA-256 hash of replicated/watched table schemas (deterministic)
 - `updated_at`: Unix timestamp of last schema state update
 - `harmonylite_version`: HarmonyLite binary version that recorded the schema state
 
@@ -191,23 +191,6 @@ func (sm *SchemaManager) ComputeSchemaHash(ctx context.Context, tables []string)
     return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// ComputeTableHash computes a deterministic SHA-256 hash for a single table
-func (sm *SchemaManager) ComputeTableHash(ctx context.Context, tableName string) (string, error) {
-    inspected, err := sm.InspectTables(ctx, []string{tableName})
-    if err != nil {
-        return "", err
-    }
-    if len(inspected) == 0 {
-        return "", fmt.Errorf("table %q not found", tableName)
-    }
-
-    h := sha256.New()
-    if err := hashTable(h, inspected[0]); err != nil {
-        return "", err
-    }
-    return hex.EncodeToString(h.Sum(nil)), nil
-}
-
 // hashTable writes a deterministic representation of a table to the hasher
 func hashTable(h io.Writer, table *schema.Table) error {
     // Sort columns by name for determinism
@@ -271,61 +254,52 @@ type ChangeLogEvent struct {
     Row       map[string]any
 
     // New field for schema tracking
-    TableHash string `cbor:"th,omitempty"`  // Hash of table schema at creation
+    SchemaHash string `cbor:"sh,omitempty"`  // Hash of all watched tables at creation
 }
 ```
 
 **Backward Compatibility:**
 - Use CBOR `omitempty` tags
-- Old events without `TableHash` are treated as "unknown schema"
+- Old events without `SchemaHash` are treated as "unknown schema"
 
 ### 4. Schema Hash Caching and Validation
 
-To avoid expensive per-event validation, table hashes are computed once and cached:
+To avoid expensive per-event validation, the schema hash is computed once and cached:
 
 ```go
 // db/schema_cache.go
 
-// SchemaCache holds precomputed table hashes for fast validation
+// SchemaCache holds the precomputed schema hash for fast validation
 type SchemaCache struct {
-    mu          sync.RWMutex
-    tableHashes map[string]string  // table name -> hash
-    tablesHash  string             // combined hash of all watched tables
+    mu         sync.RWMutex
+    schemaHash string
 }
 
-// Initialize computes and caches hashes for all watched tables
+// Initialize computes and caches the schema hash for watched tables
 func (sc *SchemaCache) Initialize(ctx context.Context, sm *SchemaManager, tables []string) error {
     sc.mu.Lock()
     defer sc.mu.Unlock()
 
-    sc.tableHashes = make(map[string]string)
-    for _, table := range tables {
-        hash, err := sm.ComputeTableHash(ctx, table)
-        if err != nil {
-            return fmt.Errorf("computing hash for %s: %w", table, err)
-        }
-        sc.tableHashes[table] = hash
+    hash, err := sm.ComputeSchemaHash(ctx, tables)
+    if err != nil {
+        return fmt.Errorf("computing schema hash: %w", err)
     }
-
-    // Compute combined hash
-    sc.tablesHash, _ = sm.ComputeSchemaHash(ctx, tables)
+    sc.schemaHash = hash
     return nil
 }
 
-// GetTableHash returns the cached hash for a table (O(1) map lookup)
-func (sc *SchemaCache) GetTableHash(table string) (string, bool) {
+// GetSchemaHash returns the cached schema hash (O(1))
+func (sc *SchemaCache) GetSchemaHash() string {
     sc.mu.RLock()
     defer sc.mu.RUnlock()
-    hash, ok := sc.tableHashes[table]
-    return hash, ok
+    return sc.schemaHash
 }
 
 // Invalidate clears the cache, forcing recomputation on next access
 func (sc *SchemaCache) Invalidate() {
     sc.mu.Lock()
     defer sc.mu.Unlock()
-    sc.tableHashes = nil
-    sc.tablesHash = ""
+    sc.schemaHash = ""
 }
 ```
 
@@ -336,22 +310,17 @@ The validation in the replication hot path is a simple string comparison:
 ```go
 // logstream/replicator.go
 
-func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent) error {
+func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent, msg *nats.Msg) error {
     // Fast path: hash comparison only (O(1))
-    if event.TableHash != "" {
-        localHash, ok := r.schemaCache.GetTableHash(event.TableName)
-        if !ok {
-            // Table not in watched list - this shouldn't happen
-            return fmt.Errorf("unknown table: %s", event.TableName)
-        }
-        if event.TableHash != localHash {
-            // Schema mismatch - queue for later
+    if event.SchemaHash != "" {
+        localHash := r.schemaCache.GetSchemaHash()
+        if event.SchemaHash != localHash {
             log.Warn().
-                Str("table", event.TableName).
-                Str("event_hash", event.TableHash[:8]).
+                Str("event_hash", event.SchemaHash[:8]).
                 Str("local_hash", localHash[:8]).
-                Msg("Schema mismatch, queuing event")
-            return r.db.QueuePendingEvent(event)
+                Msg("Schema mismatch, pausing replication")
+            msg.NakWithDelay(30 * time.Second)
+            return nil
         }
     }
 
@@ -364,9 +333,9 @@ func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent) error {
 
 | Operation | Cost | When |
 |-----------|------|------|
-| Hash computation | O(columns) + PRAGMA calls | Once at startup, on `-cleanup`, or schema change detection |
+| Hash computation | O(tables + columns) + PRAGMA calls | Once at startup, on `-cleanup`, or schema change detection |
 | Per-event validation | O(1) string comparison | Every incoming event |
-| Cache lookup | O(1) map access with RLock | Every incoming event |
+| Cache lookup | O(1) string read with RLock | Every incoming event |
 
 **Cache Invalidation:**
 
@@ -375,19 +344,11 @@ The cache is invalidated and recomputed:
 - When running `harmonylite -cleanup`
 - When a schema change is detected (future: via SQLite update hook on `sqlite_master`)
 
-### 5. Schema Mismatch Handling (Queue Policy)
+### 5. Schema Mismatch Handling (Pause Policy)
 
-When a schema mismatch is detected (hash comparison fails), events are queued for later replay:
+When a schema mismatch is detected (hash comparison fails), replication pauses for that shard by NAK-ing the message with a delay. The sequence map is not advanced, so ordering is preserved. Once the local schema is updated, NATS redelivers from the same sequence and replication resumes.
 
-```toml
-# config.toml
-
-[schema]
-# Maximum time to keep pending events before discarding
-pending_event_ttl = "168h"  # 7 days
-```
-
-**Behavior:** When an incoming event's `TableHash` doesn't match the cached local hash, the event is stored in a pending queue. Pending events are automatically replayed on node restart (see Section 7).
+**Behavior:** When an incoming event's `SchemaHash` doesn't match the cached local hash, the consumer logs a warning, NAKs with a delay, and does not apply the event.
 
 ### 6. Schema Registry via NATS KV
 
@@ -400,8 +361,7 @@ const SchemaRegistryBucket = "harmonylite-schema-registry"
 
 type NodeSchemaState struct {
     NodeId             uint64            `json:"node_id"`
-    TablesHash         string            `json:"tables_hash"`         // Combined hash of all watched tables
-    Tables             map[string]string `json:"tables"`              // table -> hash
+    SchemaHash         string            `json:"schema_hash"`         // Combined hash of all watched tables
     HarmonyLiteVersion string            `json:"harmonylite_version"`
     UpdatedAt          time.Time         `json:"updated_at"`
 }
@@ -409,8 +369,7 @@ type NodeSchemaState struct {
 func (r *Replicator) PublishSchemaState() error {
     state := NodeSchemaState{
         NodeId:             r.nodeId,
-        TablesHash:         r.db.GetTablesHash(),
-        Tables:             r.db.GetAllTableHashes(),
+        SchemaHash:         r.db.GetSchemaHash(),
         HarmonyLiteVersion: version.Version,
         UpdatedAt:          time.Now(),
     }
@@ -454,13 +413,13 @@ func (r *Replicator) CheckClusterSchemaConsistency() (*SchemaConsistencyReport, 
     var referenceHash string
     for nodeId, state := range states {
         if referenceHash == "" {
-            referenceHash = state.TablesHash
-        } else if state.TablesHash != referenceHash {
+            referenceHash = state.SchemaHash
+        } else if state.SchemaHash != referenceHash {
             report.Consistent = false
             report.Mismatches = append(report.Mismatches, SchemaMismatch{
                 NodeId:       nodeId,
                 ExpectedHash: referenceHash,
-                ActualHash:   state.TablesHash,
+                ActualHash:   state.SchemaHash,
             })
         }
     }
@@ -469,38 +428,21 @@ func (r *Replicator) CheckClusterSchemaConsistency() (*SchemaConsistencyReport, 
 }
 ```
 
-### 7. Automatic Pending Event Replay
+### 7. Apply Failure Handling (Dead-Letter)
 
-Pending events are automatically replayed on node startup, before normal replication begins. This ensures proper event ordering without requiring manual intervention.
-
-#### Pending Events Table
-
-```sql
-CREATE TABLE IF NOT EXISTS __harmonylite__pending_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_data BLOB NOT NULL,
-    table_name TEXT NOT NULL,
-    required_table_hash TEXT,
-    queued_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_pending_table ON __harmonylite__pending_events(table_name);
-```
-
-#### Dead-Letter Table
-
-Events that fail to apply (schema matches but apply fails, e.g., constraint violation) are moved to a dead-letter table for manual inspection:
+Events that match the schema hash but fail to apply (e.g., constraint violations) can be moved to a dead-letter table for manual inspection.
 
 ```sql
 CREATE TABLE IF NOT EXISTS __harmonylite__dead_letter_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    original_event_id INTEGER,          -- ID from pending_events table
     event_data BLOB NOT NULL,
     table_name TEXT NOT NULL,
-    table_hash TEXT,
-    error_message TEXT NOT NULL,        -- Why it failed
-    queued_at INTEGER NOT NULL,         -- When originally queued
-    failed_at INTEGER NOT NULL,         -- When moved to dead-letter
-    source_node_id INTEGER              -- Node that originated the event
+    schema_hash TEXT,
+    error_message TEXT NOT NULL,
+    failed_at INTEGER NOT NULL,
+    source_node_id INTEGER,
+    stream_name TEXT NOT NULL,
+    stream_seq INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dead_letter_table ON __harmonylite__dead_letter_events(table_name);
 ```
@@ -508,120 +450,6 @@ CREATE INDEX IF NOT EXISTS idx_dead_letter_table ON __harmonylite__dead_letter_e
 Users can query dead-letter events directly:
 ```bash
 sqlite3 mydb.db "SELECT table_name, error_message, datetime(failed_at, 'unixepoch') FROM __harmonylite__dead_letter_events"
-```
-
-#### Startup Sequence
-
-```go
-// Startup sequence in main.go / replicator initialization
-
-func (r *Replicator) Start() error {
-    // 1. Initialize schema cache
-    if err := r.schemaCache.Initialize(ctx, r.schemaManager, r.watchedTables); err != nil {
-        return err
-    }
-
-    // 2. Replay pending events BEFORE starting replication
-    replayed, warned, failed := r.replayPendingEvents()
-    if replayed > 0 {
-        log.Info().Int("count", replayed).Msg("Replayed pending events")
-    }
-    if warned > 0 {
-        log.Warn().Int("count", warned).Msg("Pending events still incompatible with current schema")
-    }
-    if failed > 0 {
-        log.Warn().Int("count", failed).Msg("Events moved to dead-letter table")
-    }
-
-    // 3. Start normal replication from NATS
-    return r.startReplication()
-}
-```
-
-#### Replay Logic
-
-```go
-// db/pending_events.go
-
-func (db *SqliteStreamDB) QueuePendingEvent(event *ChangeLogEvent) error {
-    data, _ := cbor.Marshal(event)
-    _, err := db.db.Exec(`
-        INSERT INTO __harmonylite__pending_events
-        (event_data, table_name, required_table_hash, queued_at)
-        VALUES (?, ?, ?, ?)`,
-        data, event.TableName, event.TableHash, time.Now().Unix())
-    return err
-}
-
-func (db *SqliteStreamDB) ReplayPendingEvents(schemaCache *SchemaCache) (replayed, stillPending, deadLettered int) {
-    rows, err := db.db.Query(`
-        SELECT id, event_data, table_name, required_table_hash, queued_at
-        FROM __harmonylite__pending_events
-        ORDER BY id ASC`)
-    if err != nil {
-        return 0, 0, 0
-    }
-    defer rows.Close()
-
-    for rows.Next() {
-        var id, queuedAt int64
-        var data []byte
-        var tableName, requiredHash string
-        rows.Scan(&id, &data, &tableName, &requiredHash, &queuedAt)
-
-        var event ChangeLogEvent
-        cbor.Unmarshal(data, &event)
-
-        // Check if schema now matches
-        localHash, _ := schemaCache.GetTableHash(tableName)
-        if requiredHash != "" && requiredHash != localHash {
-            // Still incompatible - keep in queue
-            stillPending++
-            continue
-        }
-
-        // Schema matches - try to apply
-        err := db.replicateRow(&event)
-        if err != nil {
-            // Apply failed - move to dead-letter
-            db.moveToDeadLetter(id, &event, data, queuedAt, err.Error())
-            deadLettered++
-        } else {
-            // Success - remove from pending
-            db.db.Exec("DELETE FROM __harmonylite__pending_events WHERE id = ?", id)
-            replayed++
-        }
-    }
-
-    return replayed, stillPending, deadLettered
-}
-
-func (db *SqliteStreamDB) moveToDeadLetter(originalId int64, event *ChangeLogEvent, data []byte, queuedAt int64, errMsg string) {
-    db.db.Exec(`
-        INSERT INTO __harmonylite__dead_letter_events
-        (original_event_id, event_data, table_name, table_hash, error_message, queued_at, failed_at, source_node_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        originalId, data, event.TableName, event.TableHash, errMsg, queuedAt, time.Now().Unix(), event.NodeId)
-    
-    db.db.Exec("DELETE FROM __harmonylite__pending_events WHERE id = ?", originalId)
-}
-```
-
-**Three outcomes per event:**
-1. **Schema still mismatched** → stays in pending queue, logged as warning
-2. **Schema matches, apply succeeds** → removed from pending
-3. **Schema matches, apply fails** → moved to dead-letter table
-
-#### Startup Logging
-
-```
-INFO  Starting HarmonyLite v1.2.0
-INFO  Initializing schema cache for 3 tables
-INFO  Replaying pending events...
-INFO  Replayed pending events                    count=42
-WARN  Pending events still incompatible          count=5 tables=["orders"]
-WARN  Events moved to dead-letter table          count=2 tables=["users"]
-INFO  Starting NATS replication...
 ```
 
 ### 8. CLI Commands
@@ -634,13 +462,13 @@ harmonylite schema status
 # Output:
 # Local Schema Status
 # ===================
-# Tables Hash: f6e5d4c3b2a1...
+# Schema Hash: f6e5d4c3b2a1...
 # Updated At: 2025-01-17 10:30:00
 # HarmonyLite Version: 1.2.0
 #
 # Watched Tables:
-#   users: hash=abc123...
-#   orders: hash=def456...
+#   users
+#   orders
 
 # Check schema status with cluster view (requires NATS connection)
 harmonylite schema status --cluster
@@ -654,17 +482,6 @@ harmonylite schema status --cluster
 #   a1b2c3d4: Node 1, Node 2
 #   e5f6g7h8: Node 3
 
-# Check pending and dead-letter events
-harmonylite schema pending
-# Output:
-# Pending Events by Table
-# =======================
-# users: 5 events (oldest: 2025-01-17 10:30:00)
-# orders: 0 events
-#
-# Dead-Letter Events by Table
-# ===========================
-# users: 2 events (use sqlite3 to inspect __harmonylite__dead_letter_events)
 ```
 
 ---
@@ -674,29 +491,24 @@ harmonylite schema pending
 ### Phase 1: Foundation (Schema Tracking with Atlas)
 - [ ] Add `ariga.io/atlas` dependency to `go.mod`
 - [ ] Create `db/schema_manager.go` with `SchemaManager` type wrapping Atlas SQLite driver
-- [ ] Implement `InspectTables()`, `ComputeSchemaHash()`, `ComputeTableHash()`
-- [ ] Create `db/schema_cache.go` with `SchemaCache` type for caching table hashes
+- [ ] Implement `InspectTables()` and `ComputeSchemaHash()`
+- [ ] Create `db/schema_cache.go` with `SchemaCache` type for caching the schema hash
 - [ ] Add `__harmonylite__schema_version` table creation in `InstallCDC()`
 - [ ] Initialize schema cache on startup
 - [ ] Update schema state on `-cleanup` command (invalidate and recompute cache)
 - [ ] Add `harmonylite schema status` CLI command (local only)
 
 ### Phase 2: Event Enhancement
-- [ ] Add `TableHash` field to `ChangeLogEvent`
+- [ ] Add `SchemaHash` field to `ChangeLogEvent`
 - [ ] Populate field during event creation using cached hash (O(1) lookup)
 - [ ] Ensure backward compatibility with old events (CBOR `omitempty`)
 
-### Phase 3: Validation and Automatic Replay
+### Phase 3: Validation and Pause-on-Mismatch
 - [ ] Add hash comparison in replication hot path (O(1) string comparison)
-- [ ] Create `__harmonylite__pending_events` table
+- [ ] NAK with delay when schema hash mismatches (pause replication)
 - [ ] Create `__harmonylite__dead_letter_events` table
-- [ ] Implement `QueuePendingEvent()` in `db/pending_events.go`
-- [ ] Implement `ReplayPendingEvents()` with automatic startup replay
-- [ ] Implement `moveToDeadLetter()` for failed event handling
-- [ ] Add pending event TTL and cleanup
-- [ ] Add `harmonylite schema pending` command (shows pending and dead-letter counts)
+- [ ] Implement dead-letter capture for apply failures
 - [ ] Add schema mismatch metrics (Prometheus counters)
-- [ ] Add pending events gauge metric
 - [ ] Add dead-letter events gauge metric
 
 ### Phase 4: Cluster Visibility
@@ -710,11 +522,7 @@ harmonylite schema pending
 
 ## Configuration Reference
 
-```toml
-[schema]
-# Maximum time to keep pending events before discarding
-pending_event_ttl = "168h"  # 7 days
-```
+No additional configuration required in the initial version.
 
 ---
 
@@ -723,8 +531,8 @@ pending_event_ttl = "168h"  # 7 days
 ### Prometheus Metrics
 
 ```
-# Tables hash on this node (for alerting on changes)
-harmonylite_schema_tables_hash_info{node_id="1", hash="a1b2c3d4"} 1
+# Schema hash on this node (for alerting on changes)
+harmonylite_schema_hash_info{node_id="1", hash="a1b2c3d4"} 1
 
 # Number of nodes with matching schema
 harmonylite_cluster_schema_consistent_nodes 2
@@ -732,17 +540,11 @@ harmonylite_cluster_schema_consistent_nodes 2
 # Total nodes in cluster
 harmonylite_cluster_nodes_total 3
 
-# Events queued due to schema mismatch
-harmonylite_schema_mismatch_events_total{table="users"} 42
-
-# Pending events waiting for schema match
-harmonylite_pending_events{table="users"} 156
+# Events paused due to schema mismatch
+harmonylite_schema_mismatch_events_total 42
 
 # Dead-letter events (failed to apply)
-harmonylite_dead_letter_events{table="users"} 2
-
-# Time since oldest pending event (seconds)
-harmonylite_pending_events_age_seconds{table="users"} 3600
+harmonylite_dead_letter_events_total{table="users"} 2
 ```
 
 ### Health Check Extension
@@ -755,12 +557,9 @@ Extend existing health check endpoint:
   "checks": {
     "schema": {
       "status": "warning",
-      "tables_hash": "a1b2c3d4e5f6",
+      "schema_hash": "a1b2c3d4e5f6",
       "cluster_consistent": false,
-      "mismatched_nodes": [3],
-      "pending_events": {
-        "users": 42
-      }
+      "mismatched_nodes": [3]
     }
   }
 }
@@ -772,32 +571,30 @@ Extend existing health check endpoint:
 
 ### Performing Schema Migrations
 
-Schema migrations are performed manually on each node. Incompatible events are automatically queued and replayed on restart.
+Schema migrations are performed manually on each node. Incompatible events pause replication until schemas converge.
 
 ```bash
 # 1. Apply DDL on Node 1
 sqlite3 mydb.db "ALTER TABLE users ADD COLUMN email TEXT"
 
-# 2. Restart HarmonyLite on Node 1 (pending events are automatically replayed)
+# 2. Restart HarmonyLite on Node 1 (schema hash is recalculated)
 systemctl restart harmonylite
 # Or run -cleanup to update schema state without full restart:
 harmonylite -cleanup -db mydb.db
 
 # 3. Repeat for other nodes
-# During migration window, events from migrated nodes are queued on non-migrated nodes
+# During migration window, nodes with older schemas will pause replication
 
-# 4. After all nodes are migrated and restarted, pending events are automatically replayed
-# Check for any remaining issues:
-harmonylite schema pending
+# 4. After all nodes are migrated and restarted, replication resumes automatically
 ```
 
-**Note:** During the migration window, nodes with older schemas will queue events from nodes with newer schemas. Once a node has the matching schema and restarts, pending events are automatically replayed. Events that fail to apply (e.g., constraint violations) are moved to the dead-letter table for manual inspection.
+**Note:** During the migration window, nodes with older schemas will pause replication and NATS will redeliver once schemas converge. Events that fail to apply (e.g., constraint violations) can be moved to the dead-letter table for manual inspection.
 
 ---
 
 ## Open Questions
 
-1. **Event Retention**: How long to keep pending events before discarding? (Current default: 7 days)
+1. **Stream Retention**: How long can replication stay paused before JetStream truncation forces a snapshot restore?
 
 2. **Hash Stability**: If Atlas changes its type normalization in a future version, hashes could change. Should we pin to a specific hash algorithm version?
 
