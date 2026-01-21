@@ -497,11 +497,11 @@ func payloadDecompress(payload []byte) ([]byte, error) {
 }
 
 // PublishSchemaState publishes the current node's schema state to the registry
-func (r *Replicator) PublishSchemaState(schemaHash string) error {
+func (r *Replicator) PublishSchemaState(schemaHash, previousHash string) error {
 	if r.schemaRegistry == nil {
 		return fmt.Errorf("schema registry not initialized")
 	}
-	return r.schemaRegistry.PublishSchemaState(schemaHash)
+	return r.schemaRegistry.PublishSchemaState(schemaHash, previousHash)
 }
 
 // GetClusterSchemaState retrieves schema state for all nodes in the cluster

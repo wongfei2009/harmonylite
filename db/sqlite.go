@@ -386,6 +386,14 @@ func (conn *SqliteStreamDB) GetSchemaHash() string {
 	return conn.schemaCache.GetSchemaHash()
 }
 
+// GetPreviousHash returns the previous schema hash (for rolling upgrades)
+func (conn *SqliteStreamDB) GetPreviousHash() string {
+	if conn.schemaCache == nil {
+		return ""
+	}
+	return conn.schemaCache.GetPreviousHash()
+}
+
 // GetSchemaCache returns the schema cache for direct access
 func (conn *SqliteStreamDB) GetSchemaCache() *SchemaCache {
 	return conn.schemaCache

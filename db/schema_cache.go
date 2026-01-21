@@ -10,6 +10,7 @@ import (
 type SchemaCache struct {
 	mu            sync.RWMutex
 	schemaHash    string
+	previousHash  string // Hash before last schema change (for rolling upgrades)
 	schemaManager *SchemaManager
 	tables        []string
 }
@@ -41,8 +42,17 @@ func (sc *SchemaCache) GetSchemaHash() string {
 	return sc.schemaHash
 }
 
+// GetPreviousHash returns the previous schema hash (O(1))
+// Used during rolling upgrades to accept events from nodes not yet upgraded
+func (sc *SchemaCache) GetPreviousHash() string {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	return sc.previousHash
+}
+
 // Recompute recalculates the schema hash from the database
 // Called during pause state to detect if local DDL has been applied
+// When schema changes, the old hash is preserved as previousHash
 func (sc *SchemaCache) Recompute(ctx context.Context) (string, error) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
@@ -50,6 +60,11 @@ func (sc *SchemaCache) Recompute(ctx context.Context) (string, error) {
 	hash, err := sc.schemaManager.ComputeSchemaHash(ctx, sc.tables)
 	if err != nil {
 		return "", fmt.Errorf("recomputing schema hash: %w", err)
+	}
+
+	// Preserve old hash as previous when schema changes
+	if hash != sc.schemaHash && sc.schemaHash != "" {
+		sc.previousHash = sc.schemaHash
 	}
 	sc.schemaHash = hash
 	return hash, nil

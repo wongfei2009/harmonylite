@@ -191,27 +191,37 @@ HarmonyLite supports **rolling schema upgrades** with automatic pause/resume beh
 
 ### Rolling Upgrade Workflow
 
-You can upgrade your database schema one node at a time without stopping the entire cluster:
+You can upgrade your database schema one node at a time without stopping the entire cluster. **No restart is required**—HarmonyLite automatically detects schema changes during the pause state and resumes replication.
 
 ```bash
-# 1. Stop the node
-sudo systemctl stop harmonylite
-
-# 2. Apply schema changes
+# 1. Apply schema changes (no need to stop HarmonyLite first)
 sqlite3 /var/lib/harmonylite/data.db "ALTER TABLE users ADD COLUMN email TEXT"
 
-# 3. Restart HarmonyLite (it will compute a new schema hash)
-sudo systemctl start harmonylite
+# 2. HarmonyLite automatically detects the change within 5 minutes
+#    Replication resumes automatically—no restart needed!
 
-# 4. Repeat for remaining nodes
+# 3. Repeat for remaining nodes
+```
+
+**Optional: Force Immediate Detection**
+
+If you don't want to wait for the 5-minute recompute interval:
+
+```bash
+# Option A: Restart HarmonyLite (schema hash computed on startup)
+sudo systemctl restart harmonylite
+
+# Option B: Run cleanup command
+harmonylite -cleanup -db /var/lib/harmonylite/data.db
 ```
 
 ### How It Works
 
 1. **Schema Hash Tracking**: Each replication message includes a schema hash computed from the table structure
-2. **Mismatch Detection**: When a node receives a message with a different schema hash, it pauses replication
-3. **Safe Pause**: The node NAKs messages with a delay, preserving message order in NATS
-4. **Automatic Resume**: After the local schema is upgraded and HarmonyLite restarts, replication resumes automatically
+2. **Previous Hash Support**: When a node's schema changes, it preserves the old hash. Events matching either the current or previous hash are accepted, enabling smooth rolling upgrades across multiple publishers.
+3. **Mismatch Detection**: When a node receives a message with a hash that doesn't match its current or previous hash, it pauses replication
+4. **Safe Pause**: The node NAKs messages with a delay, preserving message order in NATS
+5. **Automatic Resume**: HarmonyLite recomputes the local schema every 5 minutes during pause. After DDL is applied, replication resumes automatically—no restart required
 
 ### Monitoring Schema State
 
@@ -223,11 +233,14 @@ nats kv ls harmonylite-schema-registry
 nats kv get harmonylite-schema-registry node-1
 ```
 
+Each node's registry entry includes both `schema_hash` (current) and `previous_hash` (for rolling upgrade visibility).
+
 ### Important Notes
 
-- **During the migration window**: Nodes with older schemas will pause replication. This is expected behavior.
+- **During the migration window**: If an event's hash doesn't match either current or previous, replication pauses. This is expected for nodes 2+ versions behind.
 - **Order preservation**: Paused messages remain in NATS JetStream and are replayed after upgrade.
 - **Change log recreation**: After altering a table, HarmonyLite automatically recreates the CDC triggers and change_log table with the new column structure.
+- **One version back**: Only the immediate previous schema version is tracked. Nodes that are two or more versions behind will need to catch up before accepting events.
 
 For detailed design documentation, see [Schema Versioning Design](design/schema-versioning.md).
 

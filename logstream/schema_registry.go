@@ -16,6 +16,7 @@ const SchemaRegistryBucket = "harmonylite-schema-registry"
 type NodeSchemaState struct {
 	NodeId             uint64    `json:"node_id"`
 	SchemaHash         string    `json:"schema_hash"`
+	PreviousHash       string    `json:"previous_hash,omitempty"` // Previous hash (for rolling upgrade visibility)
 	HarmonyLiteVersion string    `json:"harmonylite_version"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }
@@ -71,10 +72,11 @@ func NewSchemaRegistry(nc *nats.Conn, nodeID uint64) (*SchemaRegistry, error) {
 }
 
 // PublishSchemaState publishes the current node's schema state to the registry
-func (sr *SchemaRegistry) PublishSchemaState(schemaHash string) error {
+func (sr *SchemaRegistry) PublishSchemaState(schemaHash, previousHash string) error {
 	state := NodeSchemaState{
 		NodeId:             sr.nodeID,
 		SchemaHash:         schemaHash,
+		PreviousHash:       previousHash,
 		HarmonyLiteVersion: version.Get().Version,
 		UpdatedAt:          time.Now(),
 	}

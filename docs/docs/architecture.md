@@ -373,10 +373,13 @@ HarmonyLite maintains a NATS KeyValue registry (`harmonylite-schema-registry`) t
 {
   "node_id": 1,
   "schema_hash": "a1b2c3d4e5f6...",
+  "previous_hash": "x9y8z7w6v5u4...",
   "harmonylite_version": "1.2.0",
   "updated_at": "2025-01-20T10:30:00Z"
 }
 ```
+
+The `previous_hash` field enables smooth rolling upgrades: a node accepts events matching either its current hash or its previous hash. This prevents unnecessary pauses when upgrading nodes one at a time in a multi-publisher cluster.
 
 This enables operators to monitor schema rollout progress across the cluster.
 
@@ -389,20 +392,29 @@ sequenceDiagram
     participant N2 as Node 2 (Old Schema)
     participant N3 as Node 3 (Old Schema)
     
-    Note over N1: Schema upgraded, new hash computed
-    N1->>NATS: Publish change (hash: abc123)
+    Note over N1: Schema upgraded, new hash H2 computed
+    Note over N1: Previous hash H1 preserved
+    N1->>NATS: Publish change (hash: H2)
     
-    NATS->>N2: Push message (hash: abc123)
-    Note over N2: Local hash: xyz789 ≠ abc123
+    NATS->>N2: Push message (hash: H2)
+    Note over N2: Local hash: H1 ≠ H2, no previous hash
     N2->>NATS: NAK with delay (pause)
     
-    Note over N2: Operator upgrades schema
-    Note over N2: Restart HarmonyLite
+    Note over N2: Operator applies DDL (no restart needed)
+    Note over N2: HarmonyLite auto-detects within 5 min
+    Note over N2: New hash: H2, previous: H1
     
-    NATS->>N2: Redeliver message (hash: abc123)
-    Note over N2: Local hash: abc123 = abc123
+    NATS->>N2: Redeliver message (hash: H2)
+    Note over N2: Local hash: H2 = H2
     N2->>N2: Apply change
     N2->>NATS: ACK
+    
+    Note over N1,N2: Meanwhile, N2 still publishes with H1
+    N2->>NATS: Publish change (hash: H1)
+    NATS->>N1: Push message (hash: H1)
+    Note over N1: H1 = previous_hash, accept!
+    N1->>N1: Apply change
+    N1->>NATS: ACK
     
     Note over N3: Same process repeats
 ```

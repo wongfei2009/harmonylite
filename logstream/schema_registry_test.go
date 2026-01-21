@@ -43,7 +43,7 @@ func TestSchemaRegistry_PublishAndGet(t *testing.T) {
 
 	// Publish schema state
 	testHash := "abc123def456"
-	err = registry.PublishSchemaState(testHash)
+	err = registry.PublishSchemaState(testHash, "")
 	require.NoError(t, err)
 
 	// Give it a moment to propagate
@@ -54,6 +54,7 @@ func TestSchemaRegistry_PublishAndGet(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), state.NodeId)
 	assert.Equal(t, testHash, state.SchemaHash)
+	assert.Empty(t, state.PreviousHash)
 	assert.NotEmpty(t, state.HarmonyLiteVersion)
 	assert.False(t, state.UpdatedAt.IsZero())
 }
@@ -73,10 +74,10 @@ func TestSchemaRegistry_ClusterState(t *testing.T) {
 	// Publish schema states
 	hash1 := "abc123"
 	hash2 := "def456"
-	err = registry1.PublishSchemaState(hash1)
+	err = registry1.PublishSchemaState(hash1, "")
 	require.NoError(t, err)
 
-	err = registry2.PublishSchemaState(hash2)
+	err = registry2.PublishSchemaState(hash2, "")
 	require.NoError(t, err)
 
 	// Give it a moment to propagate
@@ -110,10 +111,10 @@ func TestSchemaRegistry_ConsistencyCheck(t *testing.T) {
 
 		// Both nodes have the same schema
 		sameHash := "matching123"
-		err = registry1.PublishSchemaState(sameHash)
+		err = registry1.PublishSchemaState(sameHash, "")
 		require.NoError(t, err)
 
-		err = registry2.PublishSchemaState(sameHash)
+		err = registry2.PublishSchemaState(sameHash, "")
 		require.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
@@ -139,10 +140,10 @@ func TestSchemaRegistry_ConsistencyCheck(t *testing.T) {
 		// Nodes have different schemas
 		hash3 := "different1"
 		hash4 := "different2"
-		err = registry3.PublishSchemaState(hash3)
+		err = registry3.PublishSchemaState(hash3, "")
 		require.NoError(t, err)
 
-		err = registry4.PublishSchemaState(hash4)
+		err = registry4.PublishSchemaState(hash4, "")
 		require.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
@@ -164,7 +165,7 @@ func TestSchemaRegistry_TTL(t *testing.T) {
 	require.NoError(t, err)
 
 	// Publish schema state
-	err = registry.PublishSchemaState("test-hash")
+	err = registry.PublishSchemaState("test-hash", "")
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
@@ -177,4 +178,27 @@ func TestSchemaRegistry_TTL(t *testing.T) {
 	// Note: Testing actual TTL expiry would require waiting 5 minutes
 	// which is impractical for unit tests. The TTL is configured correctly
 	// in NewSchemaRegistry, so we just verify the entry was created.
+}
+
+func TestSchemaRegistry_PreviousHash(t *testing.T) {
+	ns, nc := startTestNatsServer(t)
+	defer ns.Shutdown()
+	defer nc.Close()
+
+	registry, err := NewSchemaRegistry(nc, 1)
+	require.NoError(t, err)
+
+	// Publish schema state with previous hash (simulating rolling upgrade)
+	currentHash := "new-schema-hash"
+	previousHash := "old-schema-hash"
+	err = registry.PublishSchemaState(currentHash, previousHash)
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Retrieve schema state and verify both hashes are present
+	state, err := registry.GetNodeSchemaState(1)
+	require.NoError(t, err)
+	assert.Equal(t, currentHash, state.SchemaHash)
+	assert.Equal(t, previousHash, state.PreviousHash)
 }

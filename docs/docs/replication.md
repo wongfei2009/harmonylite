@@ -71,13 +71,20 @@ Understanding how HarmonyLite behaves when things go wrong is essential for prod
 
 **Behavior**:
 *   **Detection**: When Node A publishes changes, it includes its schema hash in the message.
-*   **Pause**: Nodes B and C detect the mismatch and pause replication (NAK with 30s delay).
+*   **Previous Hash Support**: Each node tracks both its current and previous schema hash. When a node upgrades, it preserves the old hash and accepts events matching *either* hash. This enables smooth rolling upgrades when multiple nodes have `publish=true`.
+*   **Pause**: If an event's hash doesn't match *either* the current or previous hash, replication pauses (NAK with 30s delay).
 *   **Safe State**: Messages queue up in NATS JetStream. No data is lost or corrupted.
-*   **Resolution**: After upgrading schema on Nodes B and C and restarting HarmonyLite, replication resumes automatically.
+*   **Auto-Resume**: HarmonyLite periodically recomputes the local schema (every 5 minutes during pause). Once DDL is applied locally, replication resumes automatically—**no restart required**.
+
+**Rolling Upgrade Flow (Multiple Publishers)**:
+1. Node A upgrades first → new hash `H2`, preserves `H1` as previous
+2. Node B (not yet upgraded) still publishes events with hash `H1`
+3. Node A receives events from B with `H1` → matches previous hash → accepted
+4. Node B upgrades → now all nodes have matching current hash
 
 **Monitoring**:
 *   Check logs for `Schema mismatch detected, pausing replication` warnings.
-*   Use the NATS KV registry to view cluster-wide schema state.
+*   Use the NATS KV registry to view cluster-wide schema state (includes both current and previous hash).
 
 ### 2. Network Partition (Split Brain)
 
@@ -148,6 +155,6 @@ max_payload_mb = 4
 | **Data not syncing** | NATS Connectivity | Check `nats-box` connection. Check `change_log` state is sticking at `0`. |
 | **Data "reverting"** | Clock Skew | check `date` on all servers. |
 | **High Disk Usage** | Logs not pruning | Verify NATS ACKs are being received so rows move to `state=1` and get pruned. |
-| **"Schema mismatch" in logs** | Rolling upgrade in progress | Complete schema upgrade on all nodes, then restart HarmonyLite. |
-| **Replication paused** | Schema version mismatch | Check `harmonylite-schema-registry` KV for node schema hashes. Upgrade lagging nodes. |
+| **"Schema mismatch" in logs** | Rolling upgrade in progress | Apply DDL to lagging nodes. Replication auto-resumes within 5 minutes (or restart for immediate detection). |
+| **Replication paused** | Schema version mismatch | Check `harmonylite-schema-registry` KV for node schema hashes (includes previous hash). Upgrade lagging nodes. |
 | **"Gap Detected" in logs** | Node offline too long | Default behavior is auto-snapshot restore. Increase Stream limits if this happens often. |

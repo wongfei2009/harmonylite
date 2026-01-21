@@ -695,28 +695,40 @@ Inside the pprof interactive shell:
 - Errors after changing table structures
 - "no such column" errors
 - Replication stops after ALTER TABLE operations
+- Logs show "Schema mismatch detected, pausing replication"
 
 **Solutions**:
 
-1. **Proper schema change procedure**:
-   - Stop applications
-   - Apply changes on one node
-   - Run cleanup to reset triggers:
-     ```bash
-     harmonylite -config /path/to/config.toml -cleanup
-     ```
-   - Restart HarmonyLite
-   - Wait for replication
-   - Repeat on other nodes
+1. **Apply DDL and wait for auto-resume** (recommended):
+   - HarmonyLite automatically detects schema changes every 5 minutes during pause
+   - Apply DDL on each node—no restart required
+   - Replication resumes automatically once schemas match
+   ```bash
+   # Apply DDL on each node
+   sqlite3 /var/lib/harmonylite/data.db "ALTER TABLE users ADD COLUMN email TEXT"
+   # Wait up to 5 minutes for auto-resume, or force immediate detection:
+   harmonylite -config /path/to/config.toml -cleanup
+   ```
 
-2. **Verify table structure is identical** on all nodes:
+2. **Rolling upgrade with multiple publishers**:
+   - HarmonyLite tracks both current and previous schema hash
+   - Upgraded nodes accept events from not-yet-upgraded nodes (previous hash match)
+   - Upgrade nodes one at a time—no coordination required
+
+3. **Verify table structure is identical** on all nodes:
    ```sql
    .schema table_name
    ```
 
-3. **Check for foreign key issues**:
+4. **Check for foreign key issues**:
    ```sql
    PRAGMA foreign_key_check;
+   ```
+
+5. **View cluster schema state**:
+   ```bash
+   nats kv get harmonylite-schema-registry node-1
+   # Shows both schema_hash and previous_hash
    ```
 
 ## Recovery Procedures

@@ -24,7 +24,10 @@ func (r *Replicator) ValidateAndReplicateWithSchema(
 	// Fast path: hash comparison only (O(1))
 	if event.SchemaHash != "" {
 		localHash := streamDB.GetSchemaHash()
-		if event.SchemaHash != localHash {
+		prevHash := streamDB.GetPreviousHash()
+
+		// Accept if matches current OR previous schema (for rolling upgrades)
+		if event.SchemaHash != localHash && event.SchemaHash != prevHash {
 			return r.handleSchemaMismatch(event, streamDB, msg, localHash)
 		}
 	}
@@ -54,11 +57,15 @@ func (r *Replicator) handleSchemaMismatch(
 
 		ctx := context.Background()
 		newHash, err := streamDB.GetSchemaCache().Recompute(ctx)
-		if err == nil && event.SchemaHash == newHash {
-			// Schema matches after recompute (e.g., DDL applied before startup)
-			log.Info().Msg("Schema matches after initial recompute, applying event")
-			r.resetMismatchStateLocked()
-			return false, streamDB.Replicate(event)
+		if err == nil {
+			prevHash := streamDB.GetPreviousHash()
+			// Check if event matches current or previous hash after recompute
+			if event.SchemaHash == newHash || event.SchemaHash == prevHash {
+				// Schema matches after recompute (e.g., DDL applied before startup)
+				log.Info().Msg("Schema matches after initial recompute, applying event")
+				r.resetMismatchStateLocked()
+				return false, streamDB.Replicate(event)
+			}
 		}
 
 		log.Warn().
@@ -80,13 +87,17 @@ func (r *Replicator) handleSchemaMismatch(
 
 		ctx := context.Background()
 		newHash, err := streamDB.GetSchemaCache().Recompute(ctx)
-		if err == nil && event.SchemaHash == newHash {
-			// Schema now matches after local DDL was applied
-			log.Info().
-				Dur("paused_for", now.Sub(r.schemaMismatchAt)).
-				Msg("Schema now matches after recompute, resuming replication")
-			r.resetMismatchStateLocked()
-			return false, streamDB.Replicate(event)
+		if err == nil {
+			prevHash := streamDB.GetPreviousHash()
+			// Check if event matches current or previous hash after recompute
+			if event.SchemaHash == newHash || event.SchemaHash == prevHash {
+				// Schema now matches after local DDL was applied
+				log.Info().
+					Dur("paused_for", now.Sub(r.schemaMismatchAt)).
+					Msg("Schema now matches after recompute, resuming replication")
+				r.resetMismatchStateLocked()
+				return false, streamDB.Replicate(event)
+			}
 		}
 
 		log.Warn().

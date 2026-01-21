@@ -190,8 +190,9 @@ func main() {
 
 	// Publish schema state to registry after CDC installation
 	schemaHash := streamDB.GetSchemaHash()
+	previousHash := streamDB.GetPreviousHash()
 	if schemaHash != "" {
-		if err := replicator.PublishSchemaState(schemaHash); err != nil {
+		if err := replicator.PublishSchemaState(schemaHash, previousHash); err != nil {
 			log.Warn().Err(err).Msg("Failed to publish schema state to registry")
 		} else {
 			hashPreview := schemaHash

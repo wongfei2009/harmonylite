@@ -51,9 +51,19 @@ When `detailed` is set to `true` (default), the health check response will inclu
   "tables_tracked": 5,
   "last_replicated_event_timestamp": "2025-03-21T15:30:45Z",
   "last_published_event_timestamp": "2025-03-21T15:30:40Z",
+  "schema": {
+    "hash": "a1b2c3d4e5f6...",
+    "previous_hash": "x9y8z7w6v5u4...",
+    "paused": false
+  },
   "version": "1.0.0"
 }
 ```
+
+The `schema` section provides visibility into the node's schema versioning state:
+- `hash`: Current schema hash of watched tables
+- `previous_hash`: Previous schema hash (used during rolling upgrades to accept events from not-yet-upgraded nodes)
+- `paused`: Whether replication is paused due to schema mismatch
 
 When `detailed` is set to `false`, only the HTTP status code is returned, which is useful for lightweight health checks.
 
@@ -103,5 +113,8 @@ The health check endpoint checks the following components:
 2. NATS connection status
 3. CDC (Change Data Capture) hooks installation
 4. Tables being tracked
+5. Schema versioning state (current hash, previous hash, pause status)
 
 If any of these checks fail, the node will be considered unhealthy.
+
+A node with `schema.paused: true` is still considered healthy (it's a normal transient state during rolling upgrades), but you may want to monitor this field to track upgrade progress across your cluster.

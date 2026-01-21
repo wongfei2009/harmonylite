@@ -273,6 +273,7 @@ To avoid expensive per-event validation, the schema hash is computed once and ca
 type SchemaCache struct {
     mu            sync.RWMutex
     schemaHash    string
+    previousHash  string           // Hash before last schema change (for rolling upgrades)
     schemaManager *SchemaManager
     tables        []string
 }
@@ -299,8 +300,17 @@ func (sc *SchemaCache) GetSchemaHash() string {
     return sc.schemaHash
 }
 
+// GetPreviousHash returns the previous schema hash (O(1))
+// Used during rolling upgrades to accept events from nodes not yet upgraded
+func (sc *SchemaCache) GetPreviousHash() string {
+    sc.mu.RLock()
+    defer sc.mu.RUnlock()
+    return sc.previousHash
+}
+
 // Recompute recalculates the schema hash from the database
 // Called during pause state to detect if local DDL has been applied
+// When schema changes, the old hash is preserved as previousHash
 func (sc *SchemaCache) Recompute(ctx context.Context) (string, error) {
     sc.mu.Lock()
     defer sc.mu.Unlock()
@@ -308,6 +318,11 @@ func (sc *SchemaCache) Recompute(ctx context.Context) (string, error) {
     hash, err := sc.schemaManager.ComputeSchemaHash(ctx, sc.tables)
     if err != nil {
         return "", fmt.Errorf("recomputing schema hash: %w", err)
+    }
+    
+    // Preserve old hash as previous when schema changes
+    if hash != sc.schemaHash && sc.schemaHash != "" {
+        sc.previousHash = sc.schemaHash
     }
     sc.schemaHash = hash
     return hash, nil
@@ -325,7 +340,10 @@ func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent, msg *nats.Msg)
     // Fast path: hash comparison only (O(1))
     if event.SchemaHash != "" {
         localHash := r.schemaCache.GetSchemaHash()
-        if event.SchemaHash != localHash {
+        prevHash := r.schemaCache.GetPreviousHash()
+        
+        // Accept if matches current OR previous schema (for rolling upgrades)
+        if event.SchemaHash != localHash && event.SchemaHash != prevHash {
             return r.handleSchemaMismatch(event, msg)
         }
     }
@@ -341,8 +359,21 @@ func (r *Replicator) validateAndApplyEvent(event *ChangeLogEvent, msg *nats.Msg)
 | Operation | Cost | When |
 |-----------|------|------|
 | Hash computation | O(tables + columns) + PRAGMA calls | On startup, or during pause recompute interval |
-| Per-event validation | O(1) string comparison | Every incoming event |
+| Per-event validation | O(1) string comparison (x2) | Every incoming event |
 | Cache lookup | O(1) string read with RLock | Every incoming event |
+
+**Rolling Upgrade Support:**
+
+The `previousHash` field enables smooth rolling upgrades when multiple nodes have `publish=true`. Consider this scenario:
+
+1. **Node A** upgrades first → computes new schema hash `H2`, preserves `H1` as `previousHash`
+2. **Node B** hasn't upgraded yet → continues publishing events with hash `H1`
+3. **Node A** receives events from Node B with hash `H1`
+4. Since `H1` matches `previousHash`, Node A accepts the event without pausing
+
+This handles the common case where schema changes are backward compatible (e.g., adding a nullable column). Events from the previous schema version can still be applied to the new schema.
+
+**Limitation:** Only one previous version is tracked. If Node B is two or more schema versions behind, replication will pause until Node B catches up.
 
 **Cache Recomputation:**
 
@@ -499,7 +530,8 @@ const SchemaRegistryBucket = "harmonylite-schema-registry"
 
 type NodeSchemaState struct {
     NodeId             uint64            `json:"node_id"`
-    SchemaHash         string            `json:"schema_hash"`         // Combined hash of all watched tables
+    SchemaHash         string            `json:"schema_hash"`          // Current hash of all watched tables
+    PreviousHash       string            `json:"previous_hash"`        // Previous hash (for rolling upgrade visibility)
     HarmonyLiteVersion string            `json:"harmonylite_version"`
     UpdatedAt          time.Time         `json:"updated_at"`
 }
@@ -507,7 +539,8 @@ type NodeSchemaState struct {
 func (r *Replicator) PublishSchemaState() error {
     state := NodeSchemaState{
         NodeId:             r.nodeId,
-        SchemaHash:         r.db.GetSchemaHash(),
+        SchemaHash:         r.schemaCache.GetSchemaHash(),
+        PreviousHash:       r.schemaCache.GetPreviousHash(),
         HarmonyLiteVersion: version.Version,
         UpdatedAt:          time.Now(),
     }
@@ -577,6 +610,7 @@ harmonylite schema status
 # Local Schema Status
 # ===================
 # Schema Hash: f6e5d4c3b2a1...
+# Previous Hash: a1b2c3d4e5f6... (accepted during rolling upgrades)
 # Updated At: 2025-01-17 10:30:00
 # HarmonyLite Version: 1.2.0
 #
@@ -590,11 +624,11 @@ harmonylite schema status --cluster
 # Cluster Schema Status
 # =====================
 # Total Nodes: 3
-# Consistent: No
+# Consistent: No (rolling upgrade in progress)
 #
 # Hash Groups:
-#   a1b2c3d4: Node 1, Node 2
-#   e5f6g7h8: Node 3
+#   a1b2c3d4: Node 1, Node 2 (current)
+#   e5f6g7h8: Node 3 (current), Node 1 (previous), Node 2 (previous)
 
 ```
 
@@ -606,9 +640,10 @@ harmonylite schema status --cluster
 - [ ] Add `ariga.io/atlas` dependency to `go.mod`
 - [ ] Create `db/schema_manager.go` with `SchemaManager` type wrapping Atlas SQLite driver
 - [ ] Implement `InspectTables()` and `ComputeSchemaHash()`
-- [ ] Create `db/schema_cache.go` with `SchemaCache` type for caching the schema hash
+- [ ] Create `db/schema_cache.go` with `SchemaCache` type for caching current and previous schema hash
 - [ ] Add `__harmonylite__schema_version` table creation in `InstallCDC()`
 - [ ] Initialize schema cache on startup
+- [ ] Preserve previous hash when schema changes during `Recompute()`
 - [ ] Update schema state on `-cleanup` command (invalidate and recompute cache)
 - [ ] Add `harmonylite schema status` CLI command (local only)
 
@@ -620,8 +655,8 @@ harmonylite schema status --cluster
 ### Phase 3: Validation and Pause-on-Mismatch
 - [ ] Add `schemaMismatchAt` and `lastRecomputeAt` fields to `Replicator`
 - [ ] Implement `handleSchemaMismatch()` with periodic recompute logic
-- [ ] Add hash comparison in replication hot path (O(1) string comparison)
-- [ ] NAK with delay when schema hash mismatches (pause replication)
+- [ ] Add hash comparison in replication hot path (check current and previous hash)
+- [ ] NAK with delay when schema hash mismatches both current and previous
 - [ ] Recompute hash on first mismatch and every 5 minutes during pause
 - [ ] Implement `checkStreamGap()` to detect truncated messages during pause
 - [ ] Exit process when stream gap detected (triggers snapshot restore on restart)
@@ -685,7 +720,34 @@ Extend existing health check endpoint:
 
 ### Performing Schema Migrations
 
-Schema migrations are performed manually on each node. Incompatible events pause replication until schemas converge. **No restart is required** - HarmonyLite automatically detects schema changes during the pause state.
+Schema migrations are performed manually on each node. HarmonyLite supports **rolling upgrades** by accepting events from both the current and previous schema versions. **No restart is required** - HarmonyLite automatically detects schema changes during the pause state.
+
+#### Rolling Upgrade Scenario (Multiple Publishers)
+
+When multiple nodes have `publish=true`, the previous hash tracking ensures smooth upgrades:
+
+```bash
+# 1. Apply DDL on Node A (first node to upgrade)
+sqlite3 mydb.db "ALTER TABLE users ADD COLUMN email TEXT"
+
+# Node A now has:
+#   - current_hash: H2 (new schema)
+#   - previous_hash: H1 (old schema)
+
+# 2. Node B hasn't upgraded yet, still publishing events with hash H1
+#    Node A receives these events and accepts them (H1 matches previous_hash)
+
+# 3. Apply DDL on Node B
+sqlite3 mydb.db "ALTER TABLE users ADD COLUMN email TEXT"
+
+# Node B now has:
+#   - current_hash: H2
+#   - previous_hash: H1
+
+# 4. All nodes now have matching current_hash, cluster is consistent
+```
+
+#### Standard Migration (Single Publisher or Sequential)
 
 ```bash
 # 1. Apply DDL on Node 1
